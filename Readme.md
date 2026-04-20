@@ -61,6 +61,8 @@ To build a new exe file that can be run directly, you can run:
 
 - dotnet publish -r win-x64 -c Release /p:PublishSingleFile=true --self-contained true
 
+Then copy bin/Release/net10.0/win-x64/d2sitems.exe to the main directory or wherever you want it.
+
 
 
 This uses the D2SSharp project. Thanks to ResurrectedTrader.  https://github.com/levinium/D2RExtractor
