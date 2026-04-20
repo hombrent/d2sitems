@@ -27,10 +27,9 @@ I do not think you actually need to install the D2SSharp Library or if it happen
 
 We need some game files to interpret the saves.  You are going to need to extract the files.
 Use the D2RExtractor tool at https://github.com/levinium/D2RExtractor
+By default, the tool will look in the default game location to find unpacked game files.
 
-copy the game data excel folder into d2sitems/game\_files/default/
-
-You should also be able to put files from a mod here.  Future versions may allow you to select between game file directories.  Also future versions can likely just pull game files from the default location.
+You can specify the location of an "excel" directory with the --excel parameter, to parse files for a mod.
 
 To run on a single d2s file, from inside the d2sitems directory, run
 
@@ -40,7 +39,15 @@ To run on all of your saved games:
 
 - dotnet run "c:\\Users\\YourUsername\\Saved Games\\Diablo II Resurrected"
 
-You should be able to run this on your entire directory periodically - all the files will update to the current contents.
+To run on all of your saved games in the default saved game location ( C:\Users\YourUsername\Saved Games\Diablo II Resurrected) :
+
+- dotnet run 
+
+To run on all files in an alternative location:
+
+- dotnet run directory\path
+
+You can run this on your entire directory periodically - it will overwrite the old files to represent the currrent contents of your characters
 
 Then you can search the files for what you are looking for.
 
@@ -50,11 +57,13 @@ Then you can search the files for what you are looking for.
 ( Or you can get as fancy as you want in searching with tools like grep or json parsers )
 
 
+To build a new exe file that can be run directly, you can run:
+
+- dotnet publish -r win-x64 -c Release /p:PublishSingleFile=true --self-contained true
 
 
 
-This uses the D2SSharp project.
-https://github.com/levinium/D2RExtractor
+This uses the D2SSharp project. Thanks to ResurrectedTrader.  https://github.com/levinium/D2RExtractor
 
 This is vibe coded using claude.
 
