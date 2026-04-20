@@ -7,16 +7,19 @@ using System.Text.RegularExpressions;
 
 if (args.Length == 0)
 {
-    Console.WriteLine("Usage: d2sitems <file1.d2s|dir> [file2.d2s|dir] ...");
+    Console.WriteLine("Usage: d2sitems <file.d2s|file.d2i|dir> [file.d2s|file.d2i|dir] ...");
     return;
 }
 
-// Expand arguments: directories become all .d2s files within them
+// Expand arguments: directories become all .d2s and .d2i files within them
 var saveFiles = new List<string>();
 foreach (var arg in args)
 {
     if (Directory.Exists(arg))
+    {
         saveFiles.AddRange(Directory.GetFiles(arg, "*.d2s"));
+        saveFiles.AddRange(Directory.GetFiles(arg, "*.d2i"));
+    }
     else
         saveFiles.Add(arg);
 }
@@ -51,7 +54,21 @@ foreach (var saveFile in saveFiles)
         continue;
     }
 
+    var ext = Path.GetExtension(saveFile).ToLowerInvariant();
     byte[] saveBytes = File.ReadAllBytes(saveFile);
+
+    if (ext == ".d2i")
+    {
+        ProcessSharedStash(saveFile, saveBytes);
+    }
+    else
+    {
+        ProcessCharacterSave(saveFile, saveBytes);
+    }
+}
+
+void ProcessCharacterSave(string saveFile, byte[] saveBytes)
+{
     D2Save save = D2Save.Read(saveBytes);
 
     // Group items by location
@@ -97,15 +114,15 @@ foreach (var saveFile in saveFiles)
         writer.WriteLine();
 
         writer.WriteLine("Character Stats:");
-        WriteCharStat(writer, "Strength", StatId.Strength);
-        WriteCharStat(writer, "Dexterity", StatId.Dexterity);
-        WriteCharStat(writer, "Vitality", StatId.Vitality);
-        WriteCharStat(writer, "Energy", StatId.Energy);
-        WriteCharStat(writer, "Life", StatId.MaxLife);
-        WriteCharStat(writer, "Mana", StatId.MaxMana);
-        WriteCharStat(writer, "Stamina", StatId.MaxStamina);
-        WriteCharStat(writer, "Gold", StatId.Gold);
-        WriteCharStat(writer, "Stash Gold", StatId.StashGold);
+        WriteCharStat(writer, save, "Strength", StatId.Strength);
+        WriteCharStat(writer, save, "Dexterity", StatId.Dexterity);
+        WriteCharStat(writer, save, "Vitality", StatId.Vitality);
+        WriteCharStat(writer, save, "Energy", StatId.Energy);
+        WriteCharStat(writer, save, "Life", StatId.MaxLife);
+        WriteCharStat(writer, save, "Mana", StatId.MaxMana);
+        WriteCharStat(writer, save, "Stamina", StatId.MaxStamina);
+        WriteCharStat(writer, save, "Gold", StatId.Gold);
+        WriteCharStat(writer, save, "Stash Gold", StatId.StashGold);
         writer.WriteLine();
 
         WriteItemSection(writer, "Equipped Items", equipped);
@@ -115,7 +132,7 @@ foreach (var saveFile in saveFiles)
         WriteItemSection(writer, "Horadric Cube", cube);
         WriteItemSection(writer, "Mercenary Items", merc);
     }
-    Console.WriteLine($"Text written to {txtPath}");
+    Console.WriteLine($"  Text written to {txtPath}");
 
     // ── Write JSON output ──
 
@@ -127,48 +144,104 @@ foreach (var saveFile in saveFiles)
             ["level"] = save.Character.Level,
             ["class"] = save.Character.Class.ToString()
         },
-        ["stats"] = BuildCharStatsJson(),
+        ["stats"] = BuildCharStatsJson(save),
         ["items"] = equipped.Concat(belt).Concat(inventory).Concat(stash).Concat(cube).Concat(merc)
             .Select(BuildItemJson).ToList()
     };
 
     var jsonPath = Path.ChangeExtension(saveFile, ".json");
     File.WriteAllText(jsonPath, JsonSerializer.Serialize(jsonData, jsonOptions));
-    Console.WriteLine($"JSON written to {jsonPath}");
+    Console.WriteLine($"  JSON written to {jsonPath}");
+}
 
-    // Local helpers that capture 'save'
-    void WriteCharStat(TextWriter w, string label, StatId id)
+void ProcessSharedStash(string saveFile, byte[] saveBytes)
+{
+    D2StashSave stashSave = D2StashSave.Read(saveBytes);
+
+    // Collect items per tab
+    var tabItems = new List<(string TabName, uint Gold, List<Item> Items)>();
+    for (int t = 0; t < stashSave.Count; t++)
+    {
+        var tab = stashSave[t];
+        if (tab.TabType == StashTabType.Chronicle) continue;
+        var items = new List<Item>();
+        foreach (var item in tab.Items)
+            items.Add(item);
+        tabItems.Add(($"Shared Stash Tab {t + 1}", tab.Gold, items));
+    }
+
+    // ── Write text output ──
+
+    var txtPath = Path.ChangeExtension(saveFile, ".txt");
+    using (var writer = new StreamWriter(txtPath))
+    {
+        writer.WriteLine($"════════════════════════════════════════════");
+        writer.WriteLine($"  Shared Stash");
+        writer.WriteLine($"  File: {saveFile}");
+        writer.WriteLine($"  Tabs: {tabItems.Count}");
+        writer.WriteLine($"════════════════════════════════════════════");
+        writer.WriteLine();
+
+        foreach (var (tabName, gold, items) in tabItems)
+        {
+            if (gold > 0)
+                writer.WriteLine($"  {tabName} Gold: {gold}");
+            WriteItemSection(writer, tabName, items);
+        }
+    }
+    Console.WriteLine($"  Text written to {txtPath}");
+
+    // ── Write JSON output ──
+
+    var allItems = tabItems.SelectMany(t => t.Items).Select(BuildItemJson).ToList();
+    var jsonData = new Dictionary<string, object>
+    {
+        ["type"] = "SharedStash",
+        ["tabs"] = tabItems.Select(t => new Dictionary<string, object>
+        {
+            ["name"] = t.TabName,
+            ["gold"] = t.Gold,
+            ["itemCount"] = t.Items.Count
+        }).ToList(),
+        ["items"] = allItems
+    };
+
+    var jsonPath = Path.ChangeExtension(saveFile, ".json");
+    File.WriteAllText(jsonPath, JsonSerializer.Serialize(jsonData, jsonOptions));
+    Console.WriteLine($"  JSON written to {jsonPath}");
+}
+
+void WriteCharStat(TextWriter w, D2Save save, string label, StatId id)
+{
+    var val = save.Stats.GetStat(id);
+    if (val != 0)
+    {
+        if (id is StatId.MaxLife or StatId.MaxMana or StatId.MaxStamina)
+            w.WriteLine($"  {label,-14} {val >> 8}");
+        else
+            w.WriteLine($"  {label,-14} {val}");
+    }
+}
+
+Dictionary<string, long> BuildCharStatsJson(D2Save save)
+{
+    var stats = new Dictionary<string, long>();
+    void Add(string label, StatId id)
     {
         var val = save.Stats.GetStat(id);
         if (val != 0)
-        {
-            if (id is StatId.MaxLife or StatId.MaxMana or StatId.MaxStamina)
-                w.WriteLine($"  {label,-14} {val >> 8}");
-            else
-                w.WriteLine($"  {label,-14} {val}");
-        }
+            stats[label] = (id is StatId.MaxLife or StatId.MaxMana or StatId.MaxStamina) ? val >> 8 : val;
     }
-
-    Dictionary<string, long> BuildCharStatsJson()
-    {
-        var stats = new Dictionary<string, long>();
-        void Add(string label, StatId id)
-        {
-            var val = save.Stats.GetStat(id);
-            if (val != 0)
-                stats[label] = (id is StatId.MaxLife or StatId.MaxMana or StatId.MaxStamina) ? val >> 8 : val;
-        }
-        Add("strength", StatId.Strength);
-        Add("dexterity", StatId.Dexterity);
-        Add("vitality", StatId.Vitality);
-        Add("energy", StatId.Energy);
-        Add("life", StatId.MaxLife);
-        Add("mana", StatId.MaxMana);
-        Add("stamina", StatId.MaxStamina);
-        Add("gold", StatId.Gold);
-        Add("stashGold", StatId.StashGold);
-        return stats;
-    }
+    Add("strength", StatId.Strength);
+    Add("dexterity", StatId.Dexterity);
+    Add("vitality", StatId.Vitality);
+    Add("energy", StatId.Energy);
+    Add("life", StatId.MaxLife);
+    Add("mana", StatId.MaxMana);
+    Add("stamina", StatId.MaxStamina);
+    Add("gold", StatId.Gold);
+    Add("stashGold", StatId.StashGold);
+    return stats;
 }
 
 // ── Helper methods ──
@@ -418,7 +491,8 @@ string FormatStat(Stat stat)
         return $"+{value / 8.0:0.###} {desc} (per level)";
     }
 
-    if (stat.Layer != 0 && IsSkillStat(stat.Id))
+    if (IsSkillStat(stat.Id) && (stat.Layer != 0
+        || stat.Id == StatId.AddClassSkills || stat.Id == StatId.AddSkillTab))
     {
         var skillName = GetSkillName(stat.Id, stat.Layer);
         return $"+{value} to {skillName}";
