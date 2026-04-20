@@ -43,9 +43,11 @@ var jsonOptions = new JsonSerializerOptions
 
 foreach (var saveFile in saveFiles)
 {
+    Console.WriteLine($"Processing {saveFile}...");
+
     if (!File.Exists(saveFile))
     {
-        Console.WriteLine($"File not found: {saveFile}");
+        Console.WriteLine($"  File not found: {saveFile}");
         continue;
     }
 
