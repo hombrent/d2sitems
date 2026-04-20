@@ -5,15 +5,43 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
-if (args.Length == 0)
+// Parse --excel option
+var excelDir = @"C:\Program Files (x86)\Diablo II Resurrected\data\global\excel";
+var fileArgs = new List<string>();
+for (int i = 0; i < args.Length; i++)
 {
-    Console.WriteLine("Usage: d2sitems <file.d2s|file.d2i|dir> [file.d2s|file.d2i|dir] ...");
-    return;
+    if (args[i] == "--excel" && i + 1 < args.Length)
+    {
+        excelDir = args[++i];
+    }
+    else
+    {
+        fileArgs.Add(args[i]);
+    }
+}
+
+// Default to the Diablo II Resurrected save directory if no files specified
+if (fileArgs.Count == 0)
+{
+    var defaultDir = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        "Saved Games", "Diablo II Resurrected");
+    if (Directory.Exists(defaultDir))
+    {
+        fileArgs.Add(defaultDir);
+        Console.WriteLine($"No files specified, using default directory: {defaultDir}");
+    }
+    else
+    {
+        Console.WriteLine("Usage: d2sitems [--excel <path>] [file.d2s|file.d2i|dir] ...");
+        Console.WriteLine($"Default directory not found: {defaultDir}");
+        return;
+    }
 }
 
 // Expand arguments: directories become all .d2s and .d2i files within them
 var saveFiles = new List<string>();
-foreach (var arg in args)
+foreach (var arg in fileArgs)
 {
     if (Directory.Exists(arg))
     {
@@ -23,8 +51,6 @@ foreach (var arg in args)
     else
         saveFiles.Add(arg);
 }
-
-var excelDir = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "game_files", "default", "excel");
 
 // Build lookups from game_files/default/excel (shared across all files)
 var itemNames = BuildItemNameLookup(excelDir);
@@ -748,7 +774,7 @@ Dictionary<string, string> BuildItemNameLookup(string dir)
     foreach (var file in new[] { "armor.txt", "weapons.txt", "misc.txt" })
     {
         var path = Path.Combine(dir, file);
-        if (!File.Exists(path)) continue;
+        if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); continue; }
 
         var lines = File.ReadAllLines(path);
         if (lines.Length < 2) continue;
@@ -778,7 +804,7 @@ Dictionary<int, string> BuildSkillNameLookup(string dir)
 {
     var lookup = new Dictionary<int, string>();
     var path = Path.Combine(dir, "skills.txt");
-    if (!File.Exists(path)) return lookup;
+    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); return lookup; }
 
     var lines = File.ReadAllLines(path);
     if (lines.Length < 2) return lookup;
@@ -808,7 +834,7 @@ Dictionary<string, string> BuildRunewordLookup(string dir)
     // Maps "r31,r06,r30" -> "Enigma" (rune code combo -> runeword name)
     var lookup = new Dictionary<string, string>();
     var path = Path.Combine(dir, "runes.txt");
-    if (!File.Exists(path)) return lookup;
+    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); return lookup; }
 
     var lines = File.ReadAllLines(path);
     if (lines.Length < 2) return lookup;
@@ -862,7 +888,7 @@ Dictionary<int, string> BuildSetItemNameLookup(string dir)
 Dictionary<int, string> BuildIndexedNameLookup(string path)
 {
     var lookup = new Dictionary<int, string>();
-    if (!File.Exists(path)) return lookup;
+    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); return lookup; }
 
     var lines = File.ReadAllLines(path);
     if (lines.Length < 2) return lookup;
@@ -895,7 +921,7 @@ Dictionary<string, int> BuildGemApplyTypeLookup(string dir)
     foreach (var file in new[] { "armor.txt", "weapons.txt" })
     {
         var path = Path.Combine(dir, file);
-        if (!File.Exists(path)) continue;
+        if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); continue; }
 
         var lines = File.ReadAllLines(path);
         if (lines.Length < 2) continue;
@@ -924,7 +950,7 @@ Dictionary<string, GemModSet> BuildGemStatsLookup(string dir)
 {
     var lookup = new Dictionary<string, GemModSet>(StringComparer.OrdinalIgnoreCase);
     var path = Path.Combine(dir, "gems.txt");
-    if (!File.Exists(path)) return lookup;
+    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); return lookup; }
 
     var lines = File.ReadAllLines(path);
     if (lines.Length < 2) return lookup;
@@ -973,7 +999,7 @@ Dictionary<string, List<PropertyEntry>> BuildPropertyToStatsLookup(string dir)
 {
     var lookup = new Dictionary<string, List<PropertyEntry>>(StringComparer.OrdinalIgnoreCase);
     var path = Path.Combine(dir, "properties.txt");
-    if (!File.Exists(path)) return lookup;
+    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); return lookup; }
 
     var lines = File.ReadAllLines(path);
     if (lines.Length < 2) return lookup;
@@ -1017,7 +1043,7 @@ Dictionary<string, int> BuildStatNameToIdLookup(string dir)
 {
     var lookup = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
     var path = Path.Combine(dir, "itemstatcost.txt");
-    if (!File.Exists(path)) return lookup;
+    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); return lookup; }
 
     var lines = File.ReadAllLines(path);
     if (lines.Length < 2) return lookup;
