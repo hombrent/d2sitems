@@ -168,10 +168,24 @@ def transform_stat_pattern(pattern):
 def is_all_resist_pattern(pattern):
     return bool(re.match(r'^(all\s+resist|resist\s+all)$', pattern, re.IGNORECASE))
 
-NUMERIC_FIELDS = {"socketCount", "openSockets", "resistfire", "resistcold",
-                   "resistlightning", "resistpoison", "resistall"}
-TEXT_FIELDS = ["name", "baseName", "itemCode", "quality", "type", "tier", "set",
-               "location", "stat", "flag", "sockets"]
+NUMERIC_FIELDS = ["socketcount", "opensockets", "resistfire", "resistcold",
+                   "resistlightning", "resistpoison", "resistall"]
+TEXT_FIELDS = ["name", "base", "quality", "type", "tier", "set", "stat"]
+
+# Map lowercase CLI arg names to internal field names used in matches_field
+ARG_TO_FIELD = {
+    "base": "baseName",
+    "socketcount": "socketCount",
+    "opensockets": "openSockets",
+}
+
+FIELD_HELP = {
+    "base": 'item base, ie "Mage Plate" or "Phase Blade"',
+    "quality": 'item quality, ie Normal, Superior, Magic, Rare, Set, Unique',
+    "tier": 'item tier, ie Normal, Exceptional, Elite',
+    "type": 'item type, ie Axe, Sword, Shield, Ring',
+    "set": 'the set that an item belongs to.  can be a partial match, ie "trang"',
+}
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -181,17 +195,17 @@ if __name__ == "__main__":
                "  find_items.py --stat Teleport                      # search in stats\n"
                "  find_items.py --quality Unique --stat Resist        # Unique items with Resist\n"
                "  find_items.py --name Torch --stat Warlock           # Warlock Torches\n"
-               "  find_items.py --socketCount 4                        # items with exactly 4 sockets\n"
-               "  find_items.py --socketCount >=3 --quality Unique     # Unique items with 3+ sockets\n"
-               "  find_items.py --socketCount 1-3                      # items with 1 to 3 sockets\n"
+               "  find_items.py --socketcount 4                        # items with exactly 4 sockets\n"
+               "  find_items.py --socketcount >=3 --quality Unique     # Unique items with 3+ sockets\n"
+               "  find_items.py --socketcount 1-3                      # items with 1 to 3 sockets\n"
                "  find_items.py --tier Elite                           # all Elite tier items\n"
                "  find_items.py --tier Elite --quality Unique           # Elite Unique items\n"
                "  find_items.py --ethereal                              # all Ethereal items\n"
                "  find_items.py --notethereal                           # all non-Ethereal items\n"
-               "  find_items.py --ethereal --openSockets 4 --tier Elite --type Armor\n"
-               "                                                       # Ethereal Elite Armors with 4 open sockets\n"
+               "  find_items.py --ethereal --opensockets 4 --tier Elite --type Armor --quality Superior\n"
+               "                                                       # Superior Ethereal Elite Armors with 4 open sockets\n"
                '  find_items.py --set "Tal Rasha"                      # items in Tal Rasha\'s set\n'
-               "  find_items.py --baseName \"Small Charm\" --resistall 5  # small charms with 5 all resist\n",
+               "  find_items.py --basename \"Small Charm\" --resistall 5  # small charms with 5 all resist\n",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("pattern", nargs="?", default=None,
                         help="regex pattern to match item names (shorthand for --name)")
@@ -202,7 +216,7 @@ if __name__ == "__main__":
     # Add a named argument for each searchable field
     for field in TEXT_FIELDS:
         parser.add_argument(f"--{field}", metavar="PATTERN",
-                            help=f"regex pattern to match in the {field} field")
+                            help=FIELD_HELP.get(field, f"regex pattern to match in the {field} field"))
     for field in NUMERIC_FIELDS:
         parser.add_argument(f"--{field}", metavar="EXPR",
                             help=f"numeric expression for {field} (e.g. 3, >=4, 1-3)")
@@ -215,9 +229,10 @@ if __name__ == "__main__":
 
     # Build filter list from all specified field arguments
     filters = []
-    for field in TEXT_FIELDS:
-        val = getattr(args, field, None)
+    for arg in TEXT_FIELDS:
+        val = getattr(args, arg, None)
         if val is not None:
+            field = ARG_TO_FIELD.get(arg, arg)
             if field == "stat" and is_all_resist_pattern(val):
                 for element in ALL_RESIST_ELEMENTS:
                     pat = f"({element}.*resist|resist.*{element})"
@@ -226,9 +241,10 @@ if __name__ == "__main__":
                 if field == "stat":
                     val = transform_stat_pattern(val)
                 filters.append((field, re.compile(val, re.IGNORECASE), False))
-    for field in NUMERIC_FIELDS:
-        val = getattr(args, field, None)
+    for arg in NUMERIC_FIELDS:
+        val = getattr(args, arg, None)
         if val is not None:
+            field = ARG_TO_FIELD.get(arg, arg)
             filters.append((field, val, False))
     if args.ethereal:
         filters.append(("flags", re.compile(r"Ethereal", re.IGNORECASE), False))
