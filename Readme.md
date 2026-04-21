@@ -14,6 +14,10 @@ Download and install the .net 10.0 or higher sdk for your computer.
 
 - https://dotnet.microsoft.com/en-us/download/dotnet/10.0
 
+Download and install Python on your computer
+
+- https://www.python.org/downloads/windows/
+
 
 
 Clone/download this repo
@@ -49,12 +53,12 @@ To run on all files in an alternative location:
 
 You can run this on your entire directory periodically - it will overwrite the old files to represent the currrent contents of your characters
 
-Then you can search the files for what you are looking for.
 
-- cd "c:\\Users\\YourUsername\\Saved Games\\Diablo II Resurrected"
-- findstr "Enigma" \*.txt
 
-( Or you can get as fancy as you want in searching with tools like grep or json parsers )
+You can search for items with the find_items.py script.
+
+- python find_item.py --help
+
 
 
 
