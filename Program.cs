@@ -64,6 +64,7 @@ var propertyToStats = BuildPropertyToStatsLookup(excelDir);
 var statNameToId = BuildStatNameToIdLookup(excelDir);
 var itemTiers = BuildItemTierLookup(excelDir);
 var itemTypes = BuildItemTypeLookup(excelDir);
+var setItemSetNames = BuildSetItemSetNameLookup(excelDir);
 
 var jsonOptions = new JsonSerializerOptions
 {
@@ -278,6 +279,7 @@ Dictionary<string, object?> BuildItemJson(Item item)
 {
     var tier = GetItemTier(item.ItemCodeString);
     var type = GetItemType(item.ItemCodeString);
+    var setName = GetSetName(item);
     var obj = new Dictionary<string, object?>
     {
         ["name"] = GetItemDisplayName(item),
@@ -287,6 +289,7 @@ Dictionary<string, object?> BuildItemJson(Item item)
         ["type"] = type,
         ["tier"] = tier,
         ["quality"] = item.Quality.ToString(),
+        ["set"] = setName,
         ["location"] = GetLocationString(item)
     };
 
@@ -387,6 +390,9 @@ void WriteItem(TextWriter w, Item item)
         w.WriteLine($"    Type: {typeStr}");
     if (tierStr != null)
         w.WriteLine($"    Tier: {tierStr}");
+    var setNameStr = GetSetName(item);
+    if (setNameStr != null)
+        w.WriteLine($"    Set: {setNameStr}");
     if (locationStr.Length > 0)
         w.WriteLine($"    Location: {locationStr}");
 
@@ -533,6 +539,16 @@ string? GetItemType(string code)
     var trimmed = code.TrimEnd('\0').Trim();
     if (itemTypes.TryGetValue(trimmed, out var type))
         return type;
+    return null;
+}
+
+string? GetSetName(Item item)
+{
+    if (item.Quality == ItemQuality.Set && item.QualityData is SetUniqueQualityData sqd)
+    {
+        if (setItemSetNames.TryGetValue(sqd.SetUniqueFileIndex, out var setName))
+            return setName;
+    }
     return null;
 }
 
@@ -1166,6 +1182,35 @@ Dictionary<string, string> BuildItemTypeLookup(string dir)
                         lookup[code] = typeCode;
                 }
             }
+        }
+    }
+
+    return lookup;
+}
+
+Dictionary<int, string> BuildSetItemSetNameLookup(string dir)
+{
+    var lookup = new Dictionary<int, string>();
+    var path = Path.Combine(dir, "setitems.txt");
+    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); return lookup; }
+
+    var lines = File.ReadAllLines(path);
+    if (lines.Length < 2) return lookup;
+
+    var header = lines[0].Split('\t');
+    int idIdx = Array.IndexOf(header, "*ID");
+    int setIdx = Array.IndexOf(header, "set");
+    if (idIdx < 0 || setIdx < 0) return lookup;
+
+    for (int i = 1; i < lines.Length; i++)
+    {
+        var cols = lines[i].Split('\t');
+        if (cols.Length > Math.Max(idIdx, setIdx)
+            && int.TryParse(cols[idIdx].Trim(), out var id))
+        {
+            var setName = cols[setIdx].Trim();
+            if (setName.Length > 0)
+                lookup[id] = setName;
         }
     }
 

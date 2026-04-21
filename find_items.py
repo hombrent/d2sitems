@@ -40,6 +40,8 @@ def matches_field(item, field, pattern):
         return regex.search(item.get("quality", ""))
     elif field == "tier":
         return regex.search(item.get("tier") or "")
+    elif field == "set":
+        return regex.search(item.get("set") or "")
     elif field == "type":
         return regex.search(item.get("type") or "")
     elif field == "location":
@@ -83,6 +85,8 @@ def print_item(source, filename, item):
         print(f"  Type: {item['type']}")
     if item.get("tier"):
         print(f"  Tier: {item['tier']}")
+    if item.get("set"):
+        print(f"  Set: {item['set']}")
     if "flags" in item:
         print(f"  Flags: {', '.join(item['flags'])}")
     if "defense" in item:
@@ -129,7 +133,8 @@ if __name__ == "__main__":
                "  find_items.py -f tier Elite -f quality Unique       # Elite Unique items\n"
                "  find_items.py -f flags Ethereal                     # all Ethereal items\n"
                "  find_items.py -f flags Ethereal -f openSockets 4 -f tier Elite -f type Armor\n"
-               "                                                      # Ethereal Elite Armors with 4 open sockets\n",
+               "                                                      # Ethereal Elite Armors with 4 open sockets\n"
+               '  find_items.py -f set "Tal Rasha"                    # items in Tal Rasha\'s set\n',
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("pattern", nargs="?", default=None,
                         help="regex pattern to match item names (default: Infinity)")
@@ -138,7 +143,7 @@ if __name__ == "__main__":
                         help=f"directory containing JSON files (default: {default_dir})")
     parser.add_argument("-f", "--filter", nargs=2, action="append", metavar=("FIELD", "PATTERN"),
                         help="field and pattern pair (can be repeated); "
-                             "fields: name, baseName, itemCode, quality, type, tier, location, stats, flags, "
+                             "fields: name, baseName, itemCode, quality, type, tier, set, location, stats, flags, "
                              "sockets, socketCount, openSockets (numeric: 3, >=4, 1-3)")
     args = parser.parse_args()
 
