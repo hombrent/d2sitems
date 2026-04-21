@@ -139,7 +139,7 @@ void ProcessCharacterSave(string saveFile, byte[] saveBytes)
         writer.WriteLine($"════════════════════════════════════════════");
         writer.WriteLine($"  Character: {save.Character.Preview.Name}");
         writer.WriteLine($"  Level {save.Character.Level} {save.Character.Class}");
-        writer.WriteLine($"  File: {saveFile}");
+        writer.WriteLine($"  File: {Path.GetFileName(saveFile)}");
         writer.WriteLine($"════════════════════════════════════════════");
         writer.WriteLine();
 
@@ -168,6 +168,7 @@ void ProcessCharacterSave(string saveFile, byte[] saveBytes)
 
     var jsonData = new Dictionary<string, object>
     {
+        ["file"] = Path.GetFileName(saveFile),
         ["character"] = new Dictionary<string, object>
         {
             ["name"] = save.Character.Preview.Name,
@@ -207,7 +208,7 @@ void ProcessSharedStash(string saveFile, byte[] saveBytes)
     {
         writer.WriteLine($"════════════════════════════════════════════");
         writer.WriteLine($"  Shared Stash");
-        writer.WriteLine($"  File: {saveFile}");
+        writer.WriteLine($"  File: {Path.GetFileName(saveFile)}");
         writer.WriteLine($"  Tabs: {tabItems.Count}");
         writer.WriteLine($"════════════════════════════════════════════");
         writer.WriteLine();
@@ -226,6 +227,7 @@ void ProcessSharedStash(string saveFile, byte[] saveBytes)
     var allItems = tabItems.SelectMany(t => t.Items).Select(BuildItemJson).ToList();
     var jsonData = new Dictionary<string, object>
     {
+        ["file"] = Path.GetFileName(saveFile),
         ["type"] = "SharedStash",
         ["tabs"] = tabItems.Select(t => new Dictionary<string, object>
         {

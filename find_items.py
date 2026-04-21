@@ -153,10 +153,11 @@ def search_items(directory, filters):
         source = data.get("character", {}).get("name", filename)
         if "type" in data and data["type"] == "SharedStash":
             source = "Shared Stash"
+        save_file = data.get("file", filename)
 
         for item in data.get("items", []):
             if matches_all_filters(item, filters):
-                print_item(source, filename, item)
+                print_item(source, save_file, item)
 
 ALL_RESIST_ELEMENTS = ["fire", "cold", "lightning", "poison"]
 
@@ -209,8 +210,8 @@ if __name__ == "__main__":
                "  find_items.py --ethereal --opensockets 4 --tier Elite --type Armor --quality Superior\n"
                "                                                       # Superior Ethereal Elite Armors with 4 open sockets\n"
                '  find_items.py --set "Tal Rasha"                      # items in Tal Rasha\'s set\n'
-               "  find_items.py --basename \"Small Charm\" --resistall 5  # small charms with 5 all resist\n"
-               '  find_items.py --basename Amulet --ilvl ">=90" --quality Magic   # Amulets for crafting\n',
+               "  find_items.py --base \"Small Charm\" --resistall 5  # small charms with 5 all resist\n"
+               '  find_items.py --base Amulet --ilvl ">=90" --quality Magic   # Amulets for crafting\n',
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("pattern", nargs="?", default=None,
                         help="regex pattern to match item names (shorthand for --name)")
