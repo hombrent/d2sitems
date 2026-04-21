@@ -65,6 +65,7 @@ var statNameToId = BuildStatNameToIdLookup(excelDir);
 var itemTiers = BuildItemTierLookup(excelDir);
 var itemTypes = BuildItemTypeLookup(excelDir);
 var setItemSetNames = BuildSetItemSetNameLookup(excelDir);
+var itemDefenseRanges = BuildItemDefenseRangeLookup(excelDir);
 
 var jsonOptions = new JsonSerializerOptions
 {
@@ -290,6 +291,7 @@ Dictionary<string, object?> BuildItemJson(Item item)
         ["tier"] = tier,
         ["quality"] = item.Quality.ToString(),
         ["set"] = setName,
+        ["baseDefenseRange"] = GetBaseDefenseRange(item.ItemCodeString),
         ["location"] = GetLocationString(item)
     };
 
@@ -410,7 +412,13 @@ void WriteItem(TextWriter w, Item item)
         w.WriteLine($"    Flags: {string.Join(", ", flags)}");
 
     if (item.Defense.HasValue)
-        w.WriteLine($"    Defense: {item.Defense}");
+    {
+        var defRange = GetBaseDefenseRange(item.ItemCodeString);
+        if (defRange != null)
+            w.WriteLine($"    Defense: {item.Defense} (base: {defRange})");
+        else
+            w.WriteLine($"    Defense: {item.Defense}");
+    }
     if (item.MaxDurability.HasValue && item.MaxDurability > 0)
         w.WriteLine($"    Durability: {item.Durability}/{item.MaxDurability}");
     if (item.Quantity.HasValue)
@@ -539,6 +547,14 @@ string? GetItemType(string code)
     var trimmed = code.TrimEnd('\0').Trim();
     if (itemTypes.TryGetValue(trimmed, out var type))
         return type;
+    return null;
+}
+
+string? GetBaseDefenseRange(string code)
+{
+    var trimmed = code.TrimEnd('\0').Trim();
+    if (itemDefenseRanges.TryGetValue(trimmed, out var range))
+        return range;
     return null;
 }
 
@@ -1212,6 +1228,34 @@ Dictionary<int, string> BuildSetItemSetNameLookup(string dir)
             if (setName.Length > 0)
                 lookup[id] = setName;
         }
+    }
+
+    return lookup;
+}
+
+Dictionary<string, string> BuildItemDefenseRangeLookup(string dir)
+{
+    var lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    var path = Path.Combine(dir, "armor.txt");
+    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); return lookup; }
+
+    var lines = File.ReadAllLines(path);
+    if (lines.Length < 2) return lookup;
+
+    var header = lines[0].Split('\t');
+    int codeIdx = Array.IndexOf(header, "code");
+    int minIdx = Array.IndexOf(header, "minac");
+    int maxIdx = Array.IndexOf(header, "maxac");
+    if (codeIdx < 0 || minIdx < 0 || maxIdx < 0) return lookup;
+
+    for (int i = 1; i < lines.Length; i++)
+    {
+        var cols = lines[i].Split('\t');
+        if (cols.Length <= Math.Max(codeIdx, Math.Max(minIdx, maxIdx))) continue;
+        var code = cols[codeIdx].Trim();
+        if (code.Length == 0) continue;
+        if (int.TryParse(cols[minIdx].Trim(), out var min) && int.TryParse(cols[maxIdx].Trim(), out var max) && max > 0)
+            lookup[code] = $"{min}-{max}";
     }
 
     return lookup;

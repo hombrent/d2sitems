@@ -50,6 +50,8 @@ def matches_field(item, field, pattern):
         return numeric_match(item.get("socketCount", 0), pattern)
     if field == "openSockets":
         return numeric_match(item.get("openSockets", 0), pattern)
+    if field == "itemLevel":
+        return numeric_match(item.get("itemLevel", 0), pattern)
     if field in RESIST_STAT_IDS:
         return numeric_match(get_stat_value(item, RESIST_STAT_IDS[field]), pattern)
     if field == "resistall":
@@ -108,9 +110,11 @@ def matches_all_filters(item, filters):
     return True
 
 def print_item(source, filename, item):
-    print(f"[{source}] {item.get('name', '?')}")
-    print(f"  File: {filename}")
+    print(f"[Character: {source}] (file: {filename})")
+    print(f"  Name: {item.get('name', '?')}")
     print(f"  Location: {item.get('location', '?')}")
+    if "itemLevel" in item:
+        print(f"  Item Level: {item['itemLevel']}")
     if "quality" in item:
         print(f"  Quality: {item['quality']}")
     if item.get("type"):
@@ -122,7 +126,11 @@ def print_item(source, filename, item):
     if "flags" in item:
         print(f"  Flags: {', '.join(item['flags'])}")
     if "defense" in item:
-        print(f"  Defense: {item['defense']}")
+        defRange = item.get("baseDefenseRange")
+        if defRange:
+            print(f"  Defense: {item['defense']} (base: {defRange})")
+        else:
+            print(f"  Defense: {item['defense']}")
     for stat in item.get("runewordStats", []):
         print(f"  {stat['description']}")
     for stat in item.get("stats", []):
@@ -168,13 +176,14 @@ def transform_stat_pattern(pattern):
 def is_all_resist_pattern(pattern):
     return bool(re.match(r'^(all\s+resist|resist\s+all)$', pattern, re.IGNORECASE))
 
-NUMERIC_FIELDS = ["socketcount", "opensockets", "resistfire", "resistcold",
+NUMERIC_FIELDS = ["socketcount", "opensockets", "ilvl", "resistfire", "resistcold",
                    "resistlightning", "resistpoison", "resistall"]
 TEXT_FIELDS = ["name", "base", "quality", "type", "tier", "set", "stat"]
 
 # Map lowercase CLI arg names to internal field names used in matches_field
 ARG_TO_FIELD = {
     "base": "baseName",
+    "ilvl": "itemLevel",
     "socketcount": "socketCount",
     "opensockets": "openSockets",
 }
@@ -192,20 +201,16 @@ if __name__ == "__main__":
         description="Search for items matching field/pattern combos across d2sitems JSON files.",
         epilog="Examples:\n"
                "  find_items.py --name Infinity                       # search by name\n"
-               "  find_items.py --stat Teleport                      # search in stats\n"
-               "  find_items.py --quality Unique --stat Resist        # Unique items with Resist\n"
+               "  find_items.py --stat Teleport                       # search in stats\n"
+               '  find_items.py --quality Unique --resistall ">20"    # Unique items resist all greater than 20%\n'
                "  find_items.py --name Torch --stat Warlock           # Warlock Torches\n"
-               "  find_items.py --socketcount 4                        # items with exactly 4 sockets\n"
                "  find_items.py --socketcount >=3 --quality Unique     # Unique items with 3+ sockets\n"
-               "  find_items.py --socketcount 1-3                      # items with 1 to 3 sockets\n"
-               "  find_items.py --tier Elite                           # all Elite tier items\n"
                "  find_items.py --tier Elite --quality Unique           # Elite Unique items\n"
-               "  find_items.py --ethereal                              # all Ethereal items\n"
-               "  find_items.py --notethereal                           # all non-Ethereal items\n"
                "  find_items.py --ethereal --opensockets 4 --tier Elite --type Armor --quality Superior\n"
                "                                                       # Superior Ethereal Elite Armors with 4 open sockets\n"
                '  find_items.py --set "Tal Rasha"                      # items in Tal Rasha\'s set\n'
-               "  find_items.py --basename \"Small Charm\" --resistall 5  # small charms with 5 all resist\n",
+               "  find_items.py --basename \"Small Charm\" --resistall 5  # small charms with 5 all resist\n"
+               '  find_items.py --basename "Amulet" --ilvl ">=90" --quality Magic   # Amulets for crafting\n',
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("pattern", nargs="?", default=None,
                         help="regex pattern to match item names (shorthand for --name)")
