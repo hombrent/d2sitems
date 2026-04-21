@@ -57,15 +57,15 @@ Then you can search the files for what you are looking for.
 ( Or you can get as fancy as you want in searching with tools like grep or json parsers )
 
 
-To build a new exe file that can be run directly, you can run:
-
-- dotnet publish -r win-x64 -c Release /p:PublishSingleFile=true --self-contained true
-
-Then copy bin/Release/net10.0/win-x64/d2sitems.exe to the main directory or wherever you want it.
-
-
 
 This uses the D2SSharp project. Thanks to ResurrectedTrader.  https://github.com/levinium/D2RExtractor
 
 This is vibe coded using claude.
+
+
+
+This is to serve as note to self.  I don't yet know how to build a working standalone exe file.
+    To build a new exe file that can be run directly, you can run:
+    - dotnet publish -r win-x64 -c Release /p:PublishSingleFile=true --self-contained true
+    Then copy bin/Release/net10.0/win-x64/d2sitems.exe to the main directory or wherever you want it.
 
