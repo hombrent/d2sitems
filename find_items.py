@@ -204,13 +204,13 @@ if __name__ == "__main__":
                "  find_items.py --stat Teleport                       # search in stats\n"
                '  find_items.py --quality Unique --resistall ">20"    # Unique items resist all greater than 20%\n'
                "  find_items.py --name Torch --stat Warlock           # Warlock Torches\n"
-               "  find_items.py --socketcount >=3 --quality Unique     # Unique items with 3+ sockets\n"
+               '  find_items.py --socketcount ">=3" --quality Unique     # Unique items with 3+ sockets\n'
                "  find_items.py --tier Elite --quality Unique           # Elite Unique items\n"
                "  find_items.py --ethereal --opensockets 4 --tier Elite --type Armor --quality Superior\n"
                "                                                       # Superior Ethereal Elite Armors with 4 open sockets\n"
                '  find_items.py --set "Tal Rasha"                      # items in Tal Rasha\'s set\n'
                "  find_items.py --basename \"Small Charm\" --resistall 5  # small charms with 5 all resist\n"
-               '  find_items.py --basename "Amulet" --ilvl ">=90" --quality Magic   # Amulets for crafting\n',
+               '  find_items.py --basename Amulet --ilvl ">=90" --quality Magic   # Amulets for crafting\n',
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("pattern", nargs="?", default=None,
                         help="regex pattern to match item names (shorthand for --name)")
