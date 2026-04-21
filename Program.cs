@@ -62,6 +62,8 @@ var gemApplyTypes = BuildGemApplyTypeLookup(excelDir);
 var gemStats = BuildGemStatsLookup(excelDir);
 var propertyToStats = BuildPropertyToStatsLookup(excelDir);
 var statNameToId = BuildStatNameToIdLookup(excelDir);
+var itemTiers = BuildItemTierLookup(excelDir);
+var itemTypes = BuildItemTypeLookup(excelDir);
 
 var jsonOptions = new JsonSerializerOptions
 {
@@ -274,12 +276,16 @@ Dictionary<string, long> BuildCharStatsJson(D2Save save)
 
 Dictionary<string, object?> BuildItemJson(Item item)
 {
+    var tier = GetItemTier(item.ItemCodeString);
+    var type = GetItemType(item.ItemCodeString);
     var obj = new Dictionary<string, object?>
     {
         ["name"] = GetItemDisplayName(item),
         ["baseName"] = GetItemName(item.ItemCodeString),
         ["itemCode"] = item.ItemCodeString.TrimEnd('\0').Trim(),
         ["itemLevel"] = item.ItemLevel,
+        ["type"] = type,
+        ["tier"] = tier,
         ["quality"] = item.Quality.ToString(),
         ["location"] = GetLocationString(item)
     };
@@ -325,6 +331,7 @@ Dictionary<string, object?> BuildItemJson(Item item)
     if (item.Sockets.Count > 0)
     {
         obj["socketCount"] = item.Sockets.Count;
+        obj["openSockets"] = item.Sockets.Count - item.Sockets.Count(s => s != null);
         obj["sockets"] = item.Sockets
             .Where(s => s != null)
             .Select(s => new Dictionary<string, object>
@@ -372,15 +379,25 @@ void WriteItem(TextWriter w, Item item)
     var locationStr = GetLocationString(item);
 
     w.WriteLine($"  {name}");
+    var tierStr = GetItemTier(item.ItemCodeString);
+    var typeStr = GetItemType(item.ItemCodeString);
     w.WriteLine($"    Item Code: {item.ItemCodeString}, Level: {item.ItemLevel}, Quality: {item.Quality}");
 
+    if (typeStr != null)
+        w.WriteLine($"    Type: {typeStr}");
+    if (tierStr != null)
+        w.WriteLine($"    Tier: {tierStr}");
     if (locationStr.Length > 0)
         w.WriteLine($"    Location: {locationStr}");
 
     var flags = new List<string>();
     if (item.Flags.HasFlag(ItemFlags.Ethereal)) flags.Add("Ethereal");
     if (item.Flags.HasFlag(ItemFlags.Runeword)) flags.Add("Runeword");
-    if (item.Flags.HasFlag(ItemFlags.Socketed)) flags.Add($"Socketed ({item.Sockets.Count})");
+    if (item.Flags.HasFlag(ItemFlags.Socketed))
+    {
+        var open = item.Sockets.Count - item.Sockets.Count(s => s != null);
+        flags.Add(open > 0 ? $"Socketed ({item.Sockets.Count}, {open} open)" : $"Socketed ({item.Sockets.Count})");
+    }
     if (!item.Flags.HasFlag(ItemFlags.Identified)) flags.Add("Unidentified");
     if (item.Flags.HasFlag(ItemFlags.Personalized)) flags.Add("Personalized");
     if (flags.Count > 0)
@@ -501,6 +518,22 @@ string GetItemName(string code)
     if (itemNames.TryGetValue(trimmed, out var name))
         return name;
     return trimmed;
+}
+
+string? GetItemTier(string code)
+{
+    var trimmed = code.TrimEnd('\0').Trim();
+    if (itemTiers.TryGetValue(trimmed, out var tier))
+        return tier;
+    return null;
+}
+
+string? GetItemType(string code)
+{
+    var trimmed = code.TrimEnd('\0').Trim();
+    if (itemTypes.TryGetValue(trimmed, out var type))
+        return type;
+    return null;
 }
 
 string FormatStat(Stat stat)
@@ -1062,6 +1095,119 @@ Dictionary<string, int> BuildStatNameToIdLookup(string dir)
             var name = cols[nameIdx].Trim();
             if (name.Length > 0)
                 lookup[name] = id;
+        }
+    }
+
+    return lookup;
+}
+
+Dictionary<string, string> BuildItemTypeLookup(string dir)
+{
+    // First build type code -> type name from itemtypes.txt
+    var typeNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    var typesPath = Path.Combine(dir, "itemtypes.txt");
+    if (File.Exists(typesPath))
+    {
+        var lines = File.ReadAllLines(typesPath);
+        if (lines.Length >= 2)
+        {
+            var header = lines[0].Split('\t');
+            int nameIdx = Array.IndexOf(header, "ItemType");
+            int codeIdx = Array.IndexOf(header, "Code");
+            if (nameIdx >= 0 && codeIdx >= 0)
+            {
+                for (int i = 1; i < lines.Length; i++)
+                {
+                    var cols = lines[i].Split('\t');
+                    if (cols.Length > Math.Max(nameIdx, codeIdx))
+                    {
+                        var code = cols[codeIdx].Trim();
+                        var name = cols[nameIdx].Trim();
+                        if (code.Length > 0 && name.Length > 0 && !typeNames.ContainsKey(code))
+                            typeNames[code] = name;
+                    }
+                }
+            }
+        }
+    }
+    else
+    {
+        Console.WriteLine($"Warning: game file not found: {typesPath}");
+    }
+
+    // Then map item code -> type name via armor/weapons/misc type columns
+    var lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    foreach (var file in new[] { "armor.txt", "weapons.txt", "misc.txt" })
+    {
+        var path = Path.Combine(dir, file);
+        if (!File.Exists(path)) continue;
+
+        var lines = File.ReadAllLines(path);
+        if (lines.Length < 2) continue;
+
+        var header = lines[0].Split('\t');
+        int codeIdx = Array.IndexOf(header, "code");
+        int typeIdx = Array.IndexOf(header, "type");
+        if (codeIdx < 0 || typeIdx < 0) continue;
+
+        for (int i = 1; i < lines.Length; i++)
+        {
+            var cols = lines[i].Split('\t');
+            if (cols.Length > Math.Max(codeIdx, typeIdx))
+            {
+                var code = cols[codeIdx].Trim();
+                var typeCode = cols[typeIdx].Trim();
+                if (code.Length > 0 && typeCode.Length > 0 && !lookup.ContainsKey(code))
+                {
+                    if (typeNames.TryGetValue(typeCode, out var typeName))
+                        lookup[code] = typeName;
+                    else
+                        lookup[code] = typeCode;
+                }
+            }
+        }
+    }
+
+    return lookup;
+}
+
+Dictionary<string, string> BuildItemTierLookup(string dir)
+{
+    var lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    foreach (var file in new[] { "armor.txt", "weapons.txt" })
+    {
+        var path = Path.Combine(dir, file);
+        if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); continue; }
+
+        var lines = File.ReadAllLines(path);
+        if (lines.Length < 2) continue;
+
+        var header = lines[0].Split('\t');
+        int codeIdx = Array.IndexOf(header, "code");
+        int normIdx = Array.IndexOf(header, "normcode");
+        int uberIdx = Array.IndexOf(header, "ubercode");
+        int ultraIdx = Array.IndexOf(header, "ultracode");
+        if (codeIdx < 0) continue;
+
+        for (int i = 1; i < lines.Length; i++)
+        {
+            var cols = lines[i].Split('\t');
+            if (cols.Length <= codeIdx) continue;
+            var code = cols[codeIdx].Trim();
+            if (code.Length == 0) continue;
+
+            var norm = normIdx >= 0 && normIdx < cols.Length ? cols[normIdx].Trim() : "";
+            var uber = uberIdx >= 0 && uberIdx < cols.Length ? cols[uberIdx].Trim() : "";
+            var ultra = ultraIdx >= 0 && ultraIdx < cols.Length ? cols[ultraIdx].Trim() : "";
+
+            if (code == norm && !lookup.ContainsKey(code))
+                lookup[code] = "Normal";
+            else if (code == uber && !lookup.ContainsKey(code))
+                lookup[code] = "Exceptional";
+            else if (code == ultra && !lookup.ContainsKey(code))
+                lookup[code] = "Elite";
         }
     }
 
