@@ -22,6 +22,27 @@ def numeric_match(value, expr):
         if op == '<': return value < num
     return False
 
+RESIST_STAT_IDS = {
+    "resistfire": "FireResist",
+    "resistcold": "ColdResist",
+    "resistlightning": "LightningResist",
+    "resistpoison": "PoisonResist",
+}
+
+def get_stat_value(item, stat_id):
+    """Sum all values for a given stat ID across stats, runewordStats, and set bonuses."""
+    total = 0
+    for stat_list in ("stats", "runewordStats"):
+        for stat in item.get(stat_list, []):
+            if stat.get("id") == stat_id:
+                total += stat.get("value", 0)
+    # Also check set bonus stats
+    for i in range(1, 6):
+        for stat in item.get(f"setBonus{i}", []):
+            if stat.get("id") == stat_id:
+                total += stat.get("value", 0)
+    return total
+
 def matches_field(item, field, pattern):
     """Check if an item matches the pattern in the specified field.
     pattern is a compiled regex for text fields, or a string for numeric fields."""
@@ -29,6 +50,13 @@ def matches_field(item, field, pattern):
         return numeric_match(item.get("socketCount", 0), pattern)
     if field == "openSockets":
         return numeric_match(item.get("openSockets", 0), pattern)
+    if field in RESIST_STAT_IDS:
+        return numeric_match(get_stat_value(item, RESIST_STAT_IDS[field]), pattern)
+    if field == "resistall":
+        return all(
+            numeric_match(get_stat_value(item, sid), pattern)
+            for sid in RESIST_STAT_IDS.values()
+        )
     regex = pattern
     if field == "name":
         return regex.search(item.get("name", ""))
@@ -46,7 +74,7 @@ def matches_field(item, field, pattern):
         return regex.search(item.get("type") or "")
     elif field == "location":
         return regex.search(item.get("location", ""))
-    elif field == "stats":
+    elif field == "stat":
         for stat_list in ("stats", "runewordStats"):
             for stat in item.get(stat_list, []):
                 if regex.search(stat.get("description", "")):
@@ -55,7 +83,7 @@ def matches_field(item, field, pattern):
             if regex.search(bonus):
                 return True
         return False
-    elif field == "flags":
+    elif field == "flag":
         return any(regex.search(f) for f in item.get("flags", []))
     elif field == "sockets":
         return any(regex.search(s.get("name", "")) for s in item.get("sockets", []))
@@ -69,9 +97,13 @@ def matches_field(item, field, pattern):
         return False
 
 def matches_all_filters(item, filters):
-    """Check if an item matches ALL field/pattern filters."""
-    for field, regex in filters:
-        if not matches_field(item, field, regex):
+    """Check if an item matches ALL field/pattern filters.
+    Each filter is (field, pattern, negate) where negate inverts the match."""
+    for field, pattern, negate in filters:
+        result = matches_field(item, field, pattern)
+        if negate:
+            result = not result
+        if not result:
             return False
     return True
 
@@ -118,48 +150,93 @@ def search_items(directory, filters):
             if matches_all_filters(item, filters):
                 print_item(source, filename, item)
 
+ALL_RESIST_ELEMENTS = ["fire", "cold", "lightning", "poison"]
+
+def transform_stat_pattern(pattern):
+    """Transform 'resist X' to match both 'resist X' and 'X resist'.
+    'all resist' expands to check all four elements."""
+    m = re.match(r'^(all\s+resist|resist\s+all)$', pattern, re.IGNORECASE)
+    if m:
+        return None  # sentinel: handled specially
+
+    m = re.match(r'^resist\s+(.+)$', pattern, re.IGNORECASE)
+    if m:
+        word = re.escape(m.group(1))
+        return f"({word}.*resist|resist.*{word})"
+    return pattern
+
+def is_all_resist_pattern(pattern):
+    return bool(re.match(r'^(all\s+resist|resist\s+all)$', pattern, re.IGNORECASE))
+
+NUMERIC_FIELDS = {"socketCount", "openSockets", "resistfire", "resistcold",
+                   "resistlightning", "resistpoison", "resistall"}
+TEXT_FIELDS = ["name", "baseName", "itemCode", "quality", "type", "tier", "set",
+               "location", "stat", "flag", "sockets"]
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Search for items matching field/pattern combos across d2sitems JSON files.",
         epilog="Examples:\n"
-               "  find_items.py Infinity                              # search by name\n"
-               "  find_items.py -f stats Teleport                     # search in stats\n"
-               "  find_items.py -f quality Unique -f stats Resist     # Unique items with Resist\n"
-               "  find_items.py -f name Torch -f stats Warlock        # Warlock Torches\n"
-               "  find_items.py -f socketCount 4                      # items with exactly 4 sockets\n"
-               "  find_items.py -f socketCount >=3 -f quality Unique  # Unique items with 3+ sockets\n"
-               "  find_items.py -f socketCount 1-3                    # items with 1 to 3 sockets\n"
-               "  find_items.py -f tier Elite                         # all Elite tier items\n"
-               "  find_items.py -f tier Elite -f quality Unique       # Elite Unique items\n"
-               "  find_items.py -f flags Ethereal                     # all Ethereal items\n"
-               "  find_items.py -f flags Ethereal -f openSockets 4 -f tier Elite -f type Armor\n"
-               "                                                      # Ethereal Elite Armors with 4 open sockets\n"
-               '  find_items.py -f set "Tal Rasha"                    # items in Tal Rasha\'s set\n',
+               "  find_items.py --name Infinity                       # search by name\n"
+               "  find_items.py --stat Teleport                      # search in stats\n"
+               "  find_items.py --quality Unique --stat Resist        # Unique items with Resist\n"
+               "  find_items.py --name Torch --stat Warlock           # Warlock Torches\n"
+               "  find_items.py --socketCount 4                        # items with exactly 4 sockets\n"
+               "  find_items.py --socketCount >=3 --quality Unique     # Unique items with 3+ sockets\n"
+               "  find_items.py --socketCount 1-3                      # items with 1 to 3 sockets\n"
+               "  find_items.py --tier Elite                           # all Elite tier items\n"
+               "  find_items.py --tier Elite --quality Unique           # Elite Unique items\n"
+               "  find_items.py --ethereal                              # all Ethereal items\n"
+               "  find_items.py --notethereal                           # all non-Ethereal items\n"
+               "  find_items.py --ethereal --openSockets 4 --tier Elite --type Armor\n"
+               "                                                       # Ethereal Elite Armors with 4 open sockets\n"
+               '  find_items.py --set "Tal Rasha"                      # items in Tal Rasha\'s set\n'
+               "  find_items.py --baseName \"Small Charm\" --resistall 5  # small charms with 5 all resist\n",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("pattern", nargs="?", default=None,
-                        help="regex pattern to match item names (default: Infinity)")
+                        help="regex pattern to match item names (shorthand for --name)")
     default_dir = os.path.join(os.path.expanduser("~"), "Saved Games", "Diablo II Resurrected")
     parser.add_argument("-d", "--directory", default=default_dir,
                         help=f"directory containing JSON files (default: {default_dir})")
-    parser.add_argument("-f", "--filter", nargs=2, action="append", metavar=("FIELD", "PATTERN"),
-                        help="field and pattern pair (can be repeated); "
-                             "fields: name, baseName, itemCode, quality, type, tier, set, location, stats, flags, "
-                             "sockets, socketCount, openSockets (numeric: 3, >=4, 1-3)")
+
+    # Add a named argument for each searchable field
+    for field in TEXT_FIELDS:
+        parser.add_argument(f"--{field}", metavar="PATTERN",
+                            help=f"regex pattern to match in the {field} field")
+    for field in NUMERIC_FIELDS:
+        parser.add_argument(f"--{field}", metavar="EXPR",
+                            help=f"numeric expression for {field} (e.g. 3, >=4, 1-3)")
+
+    # Shorthand boolean flags
+    parser.add_argument("--ethereal", action="store_true", help="only Ethereal items")
+    parser.add_argument("--notethereal", action="store_true", help="only non-Ethereal items")
+
     args = parser.parse_args()
 
-    NUMERIC_FIELDS = {"socketCount", "openSockets"}
-
-    # Build filter list: combine -f pairs with the positional pattern (which searches name)
+    # Build filter list from all specified field arguments
     filters = []
-    if args.filter:
-        for field, pattern in args.filter:
-            if field in NUMERIC_FIELDS:
-                filters.append((field, pattern))
+    for field in TEXT_FIELDS:
+        val = getattr(args, field, None)
+        if val is not None:
+            if field == "stat" and is_all_resist_pattern(val):
+                for element in ALL_RESIST_ELEMENTS:
+                    pat = f"({element}.*resist|resist.*{element})"
+                    filters.append((field, re.compile(pat, re.IGNORECASE), False))
             else:
-                filters.append((field, re.compile(pattern, re.IGNORECASE)))
+                if field == "stat":
+                    val = transform_stat_pattern(val)
+                filters.append((field, re.compile(val, re.IGNORECASE), False))
+    for field in NUMERIC_FIELDS:
+        val = getattr(args, field, None)
+        if val is not None:
+            filters.append((field, val, False))
+    if args.ethereal:
+        filters.append(("flags", re.compile(r"Ethereal", re.IGNORECASE), False))
+    if args.notethereal:
+        filters.append(("flags", re.compile(r"Ethereal", re.IGNORECASE), True))
     if args.pattern:
-        filters.append(("name", re.compile(args.pattern, re.IGNORECASE)))
+        filters.append(("name", re.compile(args.pattern, re.IGNORECASE), False))
     if not filters:
-        filters.append(("name", re.compile("Infinity", re.IGNORECASE)))
+        filters.append(("name", re.compile("Infinity", re.IGNORECASE), False))
 
     search_items(args.directory, filters)
