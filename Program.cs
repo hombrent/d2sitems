@@ -143,6 +143,27 @@ if (isMonitorMode)
                         Console.Beep();
                         Console.WriteLine($"[{timestamp}] NEW ITEM DETECTED: {name}{scoreStr}");
 
+                        // Print stats with ranges
+                        if (item.Defense.HasValue)
+                        {
+                            var baseRange = GetBaseDefenseRange(item.ItemCodeString);
+                            if (baseRange != null)
+                                Console.WriteLine($"  Defense: {item.Defense} (base: {baseRange})");
+                            else
+                                Console.WriteLine($"  Defense: {item.Defense}");
+                        }
+                        var allMonStats = new List<Stat>();
+                        if (item.RunewordStats != null) allMonStats.AddRange(item.RunewordStats);
+                        if (item.Stats != null) allMonStats.AddRange(item.Stats);
+                        foreach (var stat in allMonStats)
+                        {
+                            var text = FormatStat(stat);
+                            if (statRanges != null && statRanges.TryGetValue(((int)stat.Id, stat.Layer), out var range) && range.Min != range.Max)
+                                Console.WriteLine($"  {text} [{range.Min}-{range.Max}]");
+                            else
+                                Console.WriteLine($"  {text}");
+                        }
+
                         // Find existing copies across all saves
                         var existing = FindExistingItems(name, findScript);
                         bool isBest = false;
@@ -168,6 +189,19 @@ if (isMonitorMode)
                                     else
                                     {
                                         Console.WriteLine($"    Copy on {charName} (no score).");
+                                    }
+                                    // Print stats of existing copy
+                                    foreach (var statList in new[] { "runewordStats", "stats" })
+                                    {
+                                        if (copy.TryGetProperty(statList, out var stats))
+                                        {
+                                            foreach (var s in stats.EnumerateArray())
+                                            {
+                                                var desc = s.TryGetProperty("description", out var d) ? d.GetString() : "?";
+                                                var rangeStr = s.TryGetProperty("range", out var r) ? $" [{r.GetString()}]" : "";
+                                                Console.WriteLine($"      {desc}{rangeStr}");
+                                            }
+                                        }
                                     }
                                 }
                             }
