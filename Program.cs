@@ -5,8 +5,16 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
-// Parse --excel option
-var excelDir = @"C:\Program Files (x86)\Diablo II Resurrected\data\global\excel";
+// Load config file (looks next to the executable, then in the current directory)
+var config = LoadConfig("d2sitems.conf");
+
+// Parse --excel option (command line overrides config, config overrides built-in default)
+var excelDir = config.GetValueOrDefault("excel_dir",
+    @"C:\Program Files (x86)\Diablo II Resurrected\data\global\excel");
+var defaultSaveDir = config.GetValueOrDefault("save_dir",
+    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+        "Saved Games", "Diablo II Resurrected"));
+
 var fileArgs = new List<string>();
 for (int i = 0; i < args.Length; i++)
 {
@@ -20,21 +28,18 @@ for (int i = 0; i < args.Length; i++)
     }
 }
 
-// Default to the Diablo II Resurrected save directory if no files specified
+// Default to the configured save directory if no files specified
 if (fileArgs.Count == 0)
 {
-    var defaultDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-        "Saved Games", "Diablo II Resurrected");
-    if (Directory.Exists(defaultDir))
+    if (Directory.Exists(defaultSaveDir))
     {
-        fileArgs.Add(defaultDir);
-        Console.WriteLine($"No files specified, using default directory: {defaultDir}");
+        fileArgs.Add(defaultSaveDir);
+        Console.WriteLine($"No files specified, using default directory: {defaultSaveDir}");
     }
     else
     {
         Console.WriteLine("Usage: d2sitems [--excel <path>] [file.d2s|file.d2i|dir] ...");
-        Console.WriteLine($"Default directory not found: {defaultDir}");
+        Console.WriteLine($"Default directory not found: {defaultSaveDir}");
         return;
     }
 }
@@ -1385,6 +1390,37 @@ Dictionary<string, Dictionary<(int StatId, int Layer), (int Min, int Max)>> Buil
     }
 
     return lookup;
+}
+
+Dictionary<string, string> LoadConfig(string filename)
+{
+    var config = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    // Look for config file next to the executable, then in the current directory
+    var candidates = new[]
+    {
+        Path.Combine(AppContext.BaseDirectory, filename),
+        Path.Combine(Directory.GetCurrentDirectory(), filename)
+    };
+
+    foreach (var path in candidates)
+    {
+        if (!File.Exists(path)) continue;
+        foreach (var line in File.ReadAllLines(path))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.Length == 0 || trimmed.StartsWith('#')) continue;
+            var eqIdx = trimmed.IndexOf('=');
+            if (eqIdx <= 0) continue;
+            var key = trimmed[..eqIdx].Trim();
+            var value = trimmed[(eqIdx + 1)..].Trim();
+            if (key.Length > 0 && value.Length > 0)
+                config[key] = value;
+        }
+        break; // use the first config file found
+    }
+
+    return config;
 }
 
 // Record types must come after all top-level statements

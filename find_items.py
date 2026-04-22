@@ -6,6 +6,30 @@ import json
 import os
 import re
 
+def load_config(filename="d2sitems.conf"):
+    """Load config from file next to this script or in the current directory."""
+    config = {}
+    candidates = [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), filename),
+        os.path.join(os.getcwd(), filename),
+    ]
+    for path in candidates:
+        if not os.path.exists(path):
+            continue
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                if '=' not in line:
+                    continue
+                key, _, value = line.partition('=')
+                key, value = key.strip(), value.strip()
+                if key and value:
+                    config[key] = value
+        break  # use the first config file found
+    return config
+
 def numeric_match(value, expr):
     """Match a numeric value against an expression like '3', '>=4', '<=2', '>0', '<5', '1-3'."""
     expr = expr.strip()
@@ -213,9 +237,12 @@ if __name__ == "__main__":
                "  find_items.py --base \"Small Charm\" --resistall 5  # small charms with 5 all resist\n"
                '  find_items.py --base Amulet --ilvl ">=90" --quality Magic   # Amulets for crafting\n',
         formatter_class=argparse.RawDescriptionHelpFormatter)
+    config = load_config()
+    default_dir = config.get("save_dir",
+        os.path.join(os.path.expanduser("~"), "Saved Games", "Diablo II Resurrected"))
+
     parser.add_argument("pattern", nargs="?", default=None,
                         help="regex pattern to match item names (shorthand for --name)")
-    default_dir = os.path.join(os.path.expanduser("~"), "Saved Games", "Diablo II Resurrected")
     parser.add_argument("-d", "--directory", default=default_dir,
                         help=f"directory containing JSON files (default: {default_dir})")
 
