@@ -134,39 +134,6 @@ void ProcessCharacterSave(string saveFile, byte[] saveBytes)
             merc.Add(item);
     }
 
-    // ── Write text output ──
-
-    var txtPath = Path.ChangeExtension(saveFile, ".txt");
-    using (var writer = new StreamWriter(txtPath))
-    {
-        writer.WriteLine($"════════════════════════════════════════════");
-        writer.WriteLine($"  Character: {save.Character.Preview.Name}");
-        writer.WriteLine($"  Level {save.Character.Level} {save.Character.Class}");
-        writer.WriteLine($"  File: {Path.GetFileName(saveFile)}");
-        writer.WriteLine($"════════════════════════════════════════════");
-        writer.WriteLine();
-
-        writer.WriteLine("Character Stats:");
-        WriteCharStat(writer, save, "Strength", StatId.Strength);
-        WriteCharStat(writer, save, "Dexterity", StatId.Dexterity);
-        WriteCharStat(writer, save, "Vitality", StatId.Vitality);
-        WriteCharStat(writer, save, "Energy", StatId.Energy);
-        WriteCharStat(writer, save, "Life", StatId.MaxLife);
-        WriteCharStat(writer, save, "Mana", StatId.MaxMana);
-        WriteCharStat(writer, save, "Stamina", StatId.MaxStamina);
-        WriteCharStat(writer, save, "Gold", StatId.Gold);
-        WriteCharStat(writer, save, "Stash Gold", StatId.StashGold);
-        writer.WriteLine();
-
-        WriteItemSection(writer, "Equipped Items", equipped);
-        WriteItemSection(writer, "Belt", belt);
-        WriteItemSection(writer, "Inventory", inventory);
-        WriteItemSection(writer, "Stash", stash);
-        WriteItemSection(writer, "Horadric Cube", cube);
-        WriteItemSection(writer, "Mercenary Items", merc);
-    }
-    Console.WriteLine($"  Text written to {txtPath}");
-
     // ── Write JSON output ──
 
     var jsonData = new Dictionary<string, object>
@@ -204,27 +171,6 @@ void ProcessSharedStash(string saveFile, byte[] saveBytes)
         tabItems.Add(($"Shared Stash Tab {t + 1}", tab.Gold, items));
     }
 
-    // ── Write text output ──
-
-    var txtPath = Path.ChangeExtension(saveFile, ".txt");
-    using (var writer = new StreamWriter(txtPath))
-    {
-        writer.WriteLine($"════════════════════════════════════════════");
-        writer.WriteLine($"  Shared Stash");
-        writer.WriteLine($"  File: {Path.GetFileName(saveFile)}");
-        writer.WriteLine($"  Tabs: {tabItems.Count}");
-        writer.WriteLine($"════════════════════════════════════════════");
-        writer.WriteLine();
-
-        foreach (var (tabName, gold, items) in tabItems)
-        {
-            if (gold > 0)
-                writer.WriteLine($"  {tabName} Gold: {gold}");
-            WriteItemSection(writer, tabName, items);
-        }
-    }
-    Console.WriteLine($"  Text written to {txtPath}");
-
     // ── Write JSON output ──
 
     var allItems = tabItems.SelectMany(t => t.Items).Select(BuildItemJson).ToList();
@@ -246,17 +192,6 @@ void ProcessSharedStash(string saveFile, byte[] saveBytes)
     Console.WriteLine($"  JSON written to {jsonPath}");
 }
 
-void WriteCharStat(TextWriter w, D2Save save, string label, StatId id)
-{
-    var val = save.Stats.GetStat(id);
-    if (val != 0)
-    {
-        if (id is StatId.MaxLife or StatId.MaxMana or StatId.MaxStamina)
-            w.WriteLine($"  {label,-14} {val >> 8}");
-        else
-            w.WriteLine($"  {label,-14} {val}");
-    }
-}
 
 Dictionary<string, long> BuildCharStatsJson(D2Save save)
 {
@@ -444,113 +379,6 @@ Dictionary<string, object> FormatStatJson(Stat stat, Dictionary<(int StatId, int
     return obj;
 }
 
-void WriteItemSection(TextWriter w, string title, List<Item> items)
-{
-    if (items.Count == 0) return;
-    w.WriteLine($"── {title} ({items.Count}) ──");
-    w.WriteLine();
-    foreach (var item in items)
-        WriteItem(w, item);
-}
-
-void WriteItem(TextWriter w, Item item)
-{
-    var name = GetItemDisplayName(item);
-    var locationStr = GetLocationString(item);
-
-    w.WriteLine($"  {name}");
-    var tierStr = GetItemTier(item.ItemCodeString);
-    var typeStr = GetItemType(item.ItemCodeString);
-    w.WriteLine($"    Item Code: {item.ItemCodeString}, Level: {item.ItemLevel}, Quality: {item.Quality}");
-
-    if (typeStr != null)
-        w.WriteLine($"    Type: {typeStr}");
-    if (tierStr != null)
-        w.WriteLine($"    Tier: {tierStr}");
-    var setNameStr = GetSetName(item);
-    if (setNameStr != null)
-        w.WriteLine($"    Set: {setNameStr}");
-    if (locationStr.Length > 0)
-        w.WriteLine($"    Location: {locationStr}");
-
-    var flags = new List<string>();
-    if (item.Flags.HasFlag(ItemFlags.Ethereal)) flags.Add("Ethereal");
-    if (item.Flags.HasFlag(ItemFlags.Runeword)) flags.Add("Runeword");
-    if (item.Flags.HasFlag(ItemFlags.Socketed))
-    {
-        var open = item.Sockets.Count - item.Sockets.Count(s => s != null);
-        flags.Add(open > 0 ? $"Socketed ({item.Sockets.Count}, {open} open)" : $"Socketed ({item.Sockets.Count})");
-    }
-    if (!item.Flags.HasFlag(ItemFlags.Identified)) flags.Add("Unidentified");
-    if (item.Flags.HasFlag(ItemFlags.Personalized)) flags.Add("Personalized");
-    if (flags.Count > 0)
-        w.WriteLine($"    Flags: {string.Join(", ", flags)}");
-
-    var statRanges = GetStatRangesForItem(item);
-
-    if (item.Defense.HasValue)
-    {
-        var effRange = GetEffectiveDefenseRange(item, statRanges);
-        var baseRange = GetBaseDefenseRange(item.ItemCodeString);
-        if (effRange.HasValue && statRanges != null && statRanges.ContainsKey((16, 0)))
-            w.WriteLine($"    Defense: {item.Defense} (range: {effRange.Value.Min}-{effRange.Value.Max}, base: {baseRange})");
-        else if (baseRange != null)
-            w.WriteLine($"    Defense: {item.Defense} (base: {baseRange})");
-        else
-            w.WriteLine($"    Defense: {item.Defense}");
-    }
-    if (item.MaxDurability.HasValue && item.MaxDurability > 0)
-        w.WriteLine($"    Durability: {item.Durability}/{item.MaxDurability}");
-    if (item.Quantity.HasValue)
-        w.WriteLine($"    Quantity: {item.Quantity}");
-    var score = CalculatePerfectionScore(item, statRanges);
-    if (score.HasValue)
-        w.WriteLine($"    Perfection: {score:F2}%");
-
-    if (item.RunewordStats?.Count > 0)
-    {
-        w.WriteLine("    Runeword Stats:");
-        foreach (var stat in item.RunewordStats)
-            w.WriteLine($"      {FormatStatWithRange(stat, statRanges)}");
-    }
-
-    if (item.Stats?.Count > 0)
-    {
-        w.WriteLine("    Stats:");
-        foreach (var stat in item.Stats)
-            w.WriteLine($"      {FormatStatWithRange(stat, statRanges)}");
-    }
-
-    for (int i = 0; i < (item.SetBonusStats?.Count ?? 0); i++)
-    {
-        if (item.SetBonusStats![i] != null && item.SetBonusStats[i].Count > 0)
-        {
-            w.WriteLine($"    Set Bonus ({i + 1} pieces):");
-            foreach (var stat in item.SetBonusStats[i])
-                w.WriteLine($"      {FormatStat(stat)}");
-        }
-    }
-
-    var socketStatLines = GetSocketStats(item);
-    if (socketStatLines.Count > 0)
-    {
-        w.WriteLine("    Socket Bonuses:");
-        foreach (var line in socketStatLines)
-            w.WriteLine($"      {line}");
-    }
-
-    if (item.Sockets.Count > 0)
-    {
-        var socketNames = item.Sockets
-            .Where(s => s != null)
-            .Select(s => GetItemName(s!.ItemCodeString))
-            .ToList();
-        w.WriteLine($"    Sockets [{item.Sockets.Count}]: {string.Join(", ", socketNames)}");
-    }
-
-    w.WriteLine();
-}
-
 string GetItemDisplayName(Item item)
 {
     var baseName = GetItemName(item.ItemCodeString);
@@ -670,14 +498,6 @@ string? GetSetName(Item item)
             return setName;
     }
     return null;
-}
-
-string FormatStatWithRange(Stat stat, Dictionary<(int StatId, int Layer), (int Min, int Max)>? ranges)
-{
-    var text = FormatStat(stat);
-    if (ranges != null && ranges.TryGetValue(((int)stat.Id, stat.Layer), out var range) && range.Min != range.Max)
-        text += $" [{range.Min}-{range.Max}]";
-    return text;
 }
 
 string FormatStat(Stat stat)

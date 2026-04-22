@@ -1,8 +1,6 @@
-This is a .net program that creates text file descriptions of what is inside diablo 2 save files.
+This is a .net program that creates json descriptions of what is inside diablo 2 save files.
 
 The purpose is to make it easier to search for specific items across all your saves/mules.
-
-It creates 2 files per d2s file.  One is a .txt file designed to be nice for humans to read.  The other is a json file to make it easier for computers to search.
 
 
 
