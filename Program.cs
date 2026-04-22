@@ -143,12 +143,49 @@ if (isMonitorMode)
                         Console.Beep();
                         Console.WriteLine($"[{timestamp}] NEW ITEM DETECTED: {name}{scoreStr}");
 
-                        // Count how many of this item we already have across all saves
-                        var count = CountExistingItems(name, findScript);
-                        if (count > 0)
-                            Console.WriteLine($"  You already have {count} of this item.");
+                        // Find existing copies across all saves
+                        var existing = FindExistingItems(name, findScript);
+                        bool isBest = false;
+                        if (existing.Count > 0)
+                        {
+                            Console.WriteLine($"  You already have {existing.Count} of this item.");
+                            if (score.HasValue)
+                            {
+                                isBest = true;
+                                foreach (var copy in existing)
+                                {
+                                    var charName = copy.TryGetProperty("character", out var cn) ? cn.GetString() : "?";
+                                    if (copy.TryGetProperty("perfectionScore", out var ps))
+                                    {
+                                        var copyScore = ps.GetDouble();
+                                        var comparison = score.Value > copyScore ? "THIS ONE IS BETTER"
+                                            : score.Value < copyScore ? "this one is worse"
+                                            : "same score";
+                                        Console.WriteLine($"    Copy on {charName} scored {copyScore:F2}%. {comparison}.");
+                                        if (copyScore >= score.Value)
+                                            isBest = false;
+                                    }
+                                    else
+                                    {
+                                        Console.WriteLine($"    Copy on {charName} (no score).");
+                                    }
+                                }
+                            }
+                        }
                         else
+                        {
                             Console.WriteLine($"  This is your first one!");
+                            isBest = true;
+                        }
+
+                        if (isBest)
+                        {
+                            for (int b = 0; b < 9; b++)
+                            {
+                                Thread.Sleep(200);
+                                Console.Beep();
+                            }
+                        }
                     }
                 }
             }
@@ -193,45 +230,32 @@ foreach (var saveFile in saveFiles)
     }
 }
 
-int CountExistingItems(string itemName, string findScript)
+List<JsonElement> FindExistingItems(string itemName, string findScript)
 {
+    var pythonCmd = config.GetValueOrDefault("python", "python");
     try
     {
         var escapedName = $"^{Regex.Escape(itemName)}$";
         var psi = new ProcessStartInfo
         {
-            FileName = "python3",
+            FileName = pythonCmd,
             ArgumentList = { findScript, "--name", escapedName, "--json" },
             UseShellExecute = false,
             RedirectStandardOutput = true
         };
         var proc = Process.Start(psi);
-        if (proc == null) return 0;
+        if (proc == null) return new();
         var output = proc.StandardOutput.ReadToEnd();
         proc.WaitForExit();
         var results = JsonSerializer.Deserialize<JsonElement>(output);
-        return results.GetArrayLength();
+        var list = new List<JsonElement>();
+        foreach (var el in results.EnumerateArray())
+            list.Add(el);
+        return list;
     }
-    catch
-    {
-        try
-        {
-            var escapedName = $"^{Regex.Escape(itemName)}$";
-            var psi = new ProcessStartInfo
-            {
-                FileName = "python",
-                ArgumentList = { findScript, "--name", escapedName, "--json" },
-                UseShellExecute = false,
-                RedirectStandardOutput = true
-            };
-            var proc = Process.Start(psi);
-            if (proc == null) return 0;
-            var output = proc.StandardOutput.ReadToEnd();
-            proc.WaitForExit();
-            var results = JsonSerializer.Deserialize<JsonElement>(output);
-            return results.GetArrayLength();
-        }
-        catch { return 0; }
+    catch {
+        Console.WriteLine($"  Make sure python is installed and runnable.  You can set the python command in d2sitems.conf.");
+        return new();
     }
 }
 
