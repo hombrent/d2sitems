@@ -2,6 +2,8 @@ This is a .net program that creates json descriptions of what is inside diablo 2
 
 The purpose is to make it easier to search for specific items across all your saves/mules.
 
+For Sets, Runewords and Uniques, it calculates a "Perfection Score" - that rates how well the item does in it's stats that have a range.
+It does not take the base defense of armor into account, but it does take enhanced defense into account.  It does not weight the value of diffent stats.  This score might not match what we humans value in items, but it should detect perfect/anti-perfect items and gives a very rough estimate on how good it is.
 
 
 How to install/use.
