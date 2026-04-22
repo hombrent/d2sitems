@@ -66,6 +66,9 @@ var itemTiers = BuildItemTierLookup(excelDir);
 var itemTypes = BuildItemTypeLookup(excelDir);
 var setItemSetNames = BuildSetItemSetNameLookup(excelDir);
 var itemDefenseRanges = BuildItemDefenseRangeLookup(excelDir);
+var uniqueStatRanges = BuildUniqueStatRangesLookup(excelDir);
+var setStatRanges = BuildSetStatRangesLookup(excelDir);
+var runewordStatRanges = BuildRunewordStatRangesLookup(excelDir);
 
 var jsonOptions = new JsonSerializerOptions
 {
@@ -278,11 +281,74 @@ Dictionary<string, long> BuildCharStatsJson(D2Save save)
 
 // ── Helper methods ──
 
+Dictionary<(int StatId, int Layer), (int Min, int Max)>? GetStatRangesForItem(Item item)
+{
+    if (item.Quality == ItemQuality.Unique && item.QualityData is SetUniqueQualityData uqd)
+    {
+        uniqueStatRanges.TryGetValue(uqd.SetUniqueFileIndex, out var ranges);
+        return ranges;
+    }
+    if (item.Quality == ItemQuality.Set && item.QualityData is SetUniqueQualityData sqd)
+    {
+        setStatRanges.TryGetValue(sqd.SetUniqueFileIndex, out var ranges);
+        return ranges;
+    }
+    if (item.Flags.HasFlag(ItemFlags.Runeword))
+    {
+        var runeKey = string.Join(",", item.Sockets
+            .Where(s => s != null)
+            .Select(s => s!.ItemCodeString.TrimEnd('\0').Trim()));
+        runewordStatRanges.TryGetValue(runeKey, out var ranges);
+        return ranges;
+    }
+    return null;
+}
+
+double? CalculatePerfectionScore(Item item, Dictionary<(int StatId, int Layer), (int Min, int Max)>? ranges)
+{
+    if (ranges == null) return null;
+
+    double totalPercent = 0;
+    int rangedCount = 0;
+
+    var allStats = new List<Stat>();
+    if (item.Stats != null) allStats.AddRange(item.Stats);
+    if (item.RunewordStats != null) allStats.AddRange(item.RunewordStats);
+
+    foreach (var stat in allStats)
+    {
+        if (stat.Id == StatId.ItemChargedSkill) continue;
+        var key = ((int)stat.Id, stat.Layer);
+        if (!ranges.TryGetValue(key, out var range)) continue;
+        if (range.Min == range.Max) continue;
+
+        var value = stat.Value;
+        if (stat.Id is StatId.MaxLife or StatId.MaxMana or StatId.MaxStamina)
+            value >>= 8;
+
+        double pct = (double)(value - range.Min) / (range.Max - range.Min) * 100.0;
+        pct = Math.Clamp(pct, 0, 100);
+        totalPercent += pct;
+        rangedCount++;
+    }
+
+    // Include base defense in the score for armor items
+    // Enhanced defense is scored separately via the ArmorPercent stat in the loop above
+    // We cannot reliably back-calculate the base defense roll from the final defense value
+    // because superior quality and ethereal bonuses interact in complex ways.
+    // Instead, we skip defense from the perfection score and rely on the ED stat range alone.
+
+    if (rangedCount == 0) return null;
+    return Math.Round(totalPercent / rangedCount, 2);
+}
+
 Dictionary<string, object?> BuildItemJson(Item item)
 {
     var tier = GetItemTier(item.ItemCodeString);
     var type = GetItemType(item.ItemCodeString);
     var setName = GetSetName(item);
+    var statRanges = GetStatRangesForItem(item);
+    var score = CalculatePerfectionScore(item, statRanges);
     var obj = new Dictionary<string, object?>
     {
         ["name"] = GetItemDisplayName(item),
@@ -294,8 +360,12 @@ Dictionary<string, object?> BuildItemJson(Item item)
         ["quality"] = item.Quality.ToString(),
         ["set"] = setName,
         ["baseDefenseRange"] = GetBaseDefenseRange(item.ItemCodeString),
+        ["defenseRange"] = statRanges != null && GetEffectiveDefenseRange(item, statRanges) is (int dMin, int dMax) ? $"{dMin}-{dMax}" : null,
         ["location"] = GetLocationString(item)
     };
+
+    if (score.HasValue)
+        obj["perfectionScore"] = score.Value;
 
     // Flags
     var flags = new List<string>();
@@ -318,16 +388,16 @@ Dictionary<string, object?> BuildItemJson(Item item)
         obj["quantity"] = item.Quantity.Value;
 
     if (item.RunewordStats?.Count > 0)
-        obj["runewordStats"] = item.RunewordStats.Select(FormatStatJson).ToList();
+        obj["runewordStats"] = item.RunewordStats.Select(s => FormatStatJson(s, statRanges)).ToList();
 
     if (item.Stats?.Count > 0)
-        obj["stats"] = item.Stats.Select(FormatStatJson).ToList();
+        obj["stats"] = item.Stats.Select(s => FormatStatJson(s, statRanges)).ToList();
 
     for (int i = 0; i < (item.SetBonusStats?.Count ?? 0); i++)
     {
         if (item.SetBonusStats![i] != null && item.SetBonusStats[i].Count > 0)
         {
-            obj[$"setBonus{i + 1}"] = item.SetBonusStats[i].Select(FormatStatJson).ToList();
+            obj[$"setBonus{i + 1}"] = item.SetBonusStats[i].Select(s => FormatStatJson(s, null)).ToList();
         }
     }
 
@@ -352,7 +422,7 @@ Dictionary<string, object?> BuildItemJson(Item item)
     return obj;
 }
 
-Dictionary<string, object> FormatStatJson(Stat stat)
+Dictionary<string, object> FormatStatJson(Stat stat, Dictionary<(int StatId, int Layer), (int Min, int Max)>? ranges)
 {
     var obj = new Dictionary<string, object>
     {
@@ -367,6 +437,9 @@ Dictionary<string, object> FormatStatJson(Stat stat)
 
     if (stat.Layer != 0)
         obj["layer"] = stat.Layer;
+
+    if (ranges != null && ranges.TryGetValue(((int)stat.Id, stat.Layer), out var range) && range.Min != range.Max)
+        obj["range"] = $"{range.Min}-{range.Max}";
 
     return obj;
 }
@@ -413,11 +486,16 @@ void WriteItem(TextWriter w, Item item)
     if (flags.Count > 0)
         w.WriteLine($"    Flags: {string.Join(", ", flags)}");
 
+    var statRanges = GetStatRangesForItem(item);
+
     if (item.Defense.HasValue)
     {
-        var defRange = GetBaseDefenseRange(item.ItemCodeString);
-        if (defRange != null)
-            w.WriteLine($"    Defense: {item.Defense} (base: {defRange})");
+        var effRange = GetEffectiveDefenseRange(item, statRanges);
+        var baseRange = GetBaseDefenseRange(item.ItemCodeString);
+        if (effRange.HasValue && statRanges != null && statRanges.ContainsKey((16, 0)))
+            w.WriteLine($"    Defense: {item.Defense} (range: {effRange.Value.Min}-{effRange.Value.Max}, base: {baseRange})");
+        else if (baseRange != null)
+            w.WriteLine($"    Defense: {item.Defense} (base: {baseRange})");
         else
             w.WriteLine($"    Defense: {item.Defense}");
     }
@@ -425,19 +503,22 @@ void WriteItem(TextWriter w, Item item)
         w.WriteLine($"    Durability: {item.Durability}/{item.MaxDurability}");
     if (item.Quantity.HasValue)
         w.WriteLine($"    Quantity: {item.Quantity}");
+    var score = CalculatePerfectionScore(item, statRanges);
+    if (score.HasValue)
+        w.WriteLine($"    Perfection: {score:F2}%");
 
     if (item.RunewordStats?.Count > 0)
     {
         w.WriteLine("    Runeword Stats:");
         foreach (var stat in item.RunewordStats)
-            w.WriteLine($"      {FormatStat(stat)}");
+            w.WriteLine($"      {FormatStatWithRange(stat, statRanges)}");
     }
 
     if (item.Stats?.Count > 0)
     {
         w.WriteLine("    Stats:");
         foreach (var stat in item.Stats)
-            w.WriteLine($"      {FormatStat(stat)}");
+            w.WriteLine($"      {FormatStatWithRange(stat, statRanges)}");
     }
 
     for (int i = 0; i < (item.SetBonusStats?.Count ?? 0); i++)
@@ -560,6 +641,27 @@ string? GetBaseDefenseRange(string code)
     return null;
 }
 
+(int Min, int Max)? GetEffectiveDefenseRange(Item item, Dictionary<(int StatId, int Layer), (int Min, int Max)>? statRanges)
+{
+    var baseRangeStr = GetBaseDefenseRange(item.ItemCodeString);
+    if (baseRangeStr == null) return null;
+    var parts = baseRangeStr.Split('-');
+    if (parts.Length != 2 || !int.TryParse(parts[0], out var baseMin) || !int.TryParse(parts[1], out var baseMax))
+        return null;
+
+    // Look up enhanced defense (ArmorPercent, StatId=16) range from the item's stat ranges
+    int edMin = 0, edMax = 0;
+    if (statRanges != null && statRanges.TryGetValue((16, 0), out var edRange))
+    {
+        edMin = edRange.Min;
+        edMax = edRange.Max;
+    }
+
+    int effMin = (int)(baseMin * (1 + edMin / 100.0));
+    int effMax = (int)(baseMax * (1 + edMax / 100.0));
+    return (effMin, effMax);
+}
+
 string? GetSetName(Item item)
 {
     if (item.Quality == ItemQuality.Set && item.QualityData is SetUniqueQualityData sqd)
@@ -568,6 +670,14 @@ string? GetSetName(Item item)
             return setName;
     }
     return null;
+}
+
+string FormatStatWithRange(Stat stat, Dictionary<(int StatId, int Layer), (int Min, int Max)>? ranges)
+{
+    var text = FormatStat(stat);
+    if (ranges != null && ranges.TryGetValue(((int)stat.Id, stat.Layer), out var range) && range.Min != range.Max)
+        text += $" [{range.Min}-{range.Max}]";
+    return text;
 }
 
 string FormatStat(Stat stat)
@@ -1300,6 +1410,158 @@ Dictionary<string, string> BuildItemTierLookup(string dir)
             else if (code == ultra && !lookup.ContainsKey(code))
                 lookup[code] = "Elite";
         }
+    }
+
+    return lookup;
+}
+
+// Resolve a property code to its primary StatId using properties.txt and itemstatcost.txt
+int ResolvePropertyToStatId(string propCode)
+{
+    if (string.IsNullOrEmpty(propCode)) return -1;
+    if (!propertyToStats.TryGetValue(propCode, out var entries) || entries.Count == 0) return -1;
+    var entry = entries[0];
+    // Skip properties where min/max don't represent a value range
+    // 11=gethit-skill, 19=charged, 12=skill-rand, 36=randclassskill
+    // 15/16=elemental damage min/max (min=mindam, max=maxdam, not a roll range)
+    // 17=per-level stats (param is the per-level value, not a range)
+    if (entry.Func is 11 or 19 or 12 or 15 or 16 or 17 or 36) return -1;
+    if (string.IsNullOrEmpty(entry.Stat)) return -1;
+    if (statNameToId.TryGetValue(entry.Stat, out var id)) return id;
+    return -1;
+}
+
+// Resolve a property param to a layer value (e.g., skill name -> skill ID)
+int ResolveParamToLayer(string propCode, string param)
+{
+    if (string.IsNullOrEmpty(param)) return 0;
+    // For skill-based properties (oskill, skill, skilltab, gethit-skill), param is a skill name
+    if (!propertyToStats.TryGetValue(propCode, out var entries) || entries.Count == 0) return 0;
+    var func = entries[0].Func;
+    if (func is 10 or 22) // skilltab, oskill/skill
+    {
+        // Try to look up skill name -> skill ID
+        if (int.TryParse(param, out var directId)) return directId;
+        foreach (var kvp in skillNames)
+        {
+            if (kvp.Value.Equals(param, StringComparison.OrdinalIgnoreCase))
+                return kvp.Key;
+        }
+    }
+    if (int.TryParse(param, out var numParam)) return numParam;
+    return 0;
+}
+
+Dictionary<(int StatId, int Layer), (int Min, int Max)> ParseStatRangesFromProps(string[] cols, int propStart, int propCount, int propStride)
+{
+    var ranges = new Dictionary<(int StatId, int Layer), (int Min, int Max)>();
+    for (int p = 0; p < propCount; p++)
+    {
+        int baseIdx = propStart + p * propStride;
+        if (baseIdx + 3 >= cols.Length) break;
+        var propCode = cols[baseIdx].Trim();
+        if (propCode.Length == 0) continue;
+        var param = cols[baseIdx + 1].Trim();
+        int.TryParse(cols[baseIdx + 2].Trim(), out var min);
+        int.TryParse(cols[baseIdx + 3].Trim(), out var max);
+        var statId = ResolvePropertyToStatId(propCode);
+        if (statId < 0) continue;
+        var layer = ResolveParamToLayer(propCode, param);
+        var key = (statId, layer);
+        if (!ranges.ContainsKey(key))
+            ranges[key] = (min, max);
+    }
+    return ranges;
+}
+
+Dictionary<int, Dictionary<(int StatId, int Layer), (int Min, int Max)>> BuildUniqueStatRangesLookup(string dir)
+{
+    var lookup = new Dictionary<int, Dictionary<(int StatId, int Layer), (int Min, int Max)>>();
+    var path = Path.Combine(dir, "uniqueitems.txt");
+    if (!File.Exists(path)) return lookup;
+
+    var lines = File.ReadAllLines(path);
+    if (lines.Length < 2) return lookup;
+
+    var header = lines[0].Split('\t');
+    int idIdx = Array.IndexOf(header, "*ID");
+    int propStart = Array.IndexOf(header, "prop1");
+    if (idIdx < 0 || propStart < 0) return lookup;
+
+    for (int i = 1; i < lines.Length; i++)
+    {
+        var cols = lines[i].Split('\t');
+        if (cols.Length <= idIdx) continue;
+        if (!int.TryParse(cols[idIdx].Trim(), out var id)) continue;
+        var ranges = ParseStatRangesFromProps(cols, propStart, 12, 4);
+        if (ranges.Count > 0)
+            lookup[id] = ranges;
+    }
+
+    return lookup;
+}
+
+Dictionary<int, Dictionary<(int StatId, int Layer), (int Min, int Max)>> BuildSetStatRangesLookup(string dir)
+{
+    var lookup = new Dictionary<int, Dictionary<(int StatId, int Layer), (int Min, int Max)>>();
+    var path = Path.Combine(dir, "setitems.txt");
+    if (!File.Exists(path)) return lookup;
+
+    var lines = File.ReadAllLines(path);
+    if (lines.Length < 2) return lookup;
+
+    var header = lines[0].Split('\t');
+    int idIdx = Array.IndexOf(header, "*ID");
+    int propStart = Array.IndexOf(header, "prop1");
+    if (idIdx < 0 || propStart < 0) return lookup;
+
+    for (int i = 1; i < lines.Length; i++)
+    {
+        var cols = lines[i].Split('\t');
+        if (cols.Length <= idIdx) continue;
+        if (!int.TryParse(cols[idIdx].Trim(), out var id)) continue;
+        var ranges = ParseStatRangesFromProps(cols, propStart, 9, 4);
+        if (ranges.Count > 0)
+            lookup[id] = ranges;
+    }
+
+    return lookup;
+}
+
+Dictionary<string, Dictionary<(int StatId, int Layer), (int Min, int Max)>> BuildRunewordStatRangesLookup(string dir)
+{
+    // Keyed by rune combo string like "r31,r06,r30"
+    var lookup = new Dictionary<string, Dictionary<(int StatId, int Layer), (int Min, int Max)>>();
+    var path = Path.Combine(dir, "runes.txt");
+    if (!File.Exists(path)) return lookup;
+
+    var lines = File.ReadAllLines(path);
+    if (lines.Length < 2) return lookup;
+
+    var header = lines[0].Split('\t');
+    int completeIdx = Array.IndexOf(header, "complete");
+    int rune1Idx = Array.IndexOf(header, "Rune1");
+    int propStart = Array.IndexOf(header, "T1Code1");
+    if (rune1Idx < 0 || propStart < 0) return lookup;
+
+    for (int i = 1; i < lines.Length; i++)
+    {
+        var cols = lines[i].Split('\t');
+        if (cols.Length <= propStart) continue;
+        if (completeIdx >= 0 && cols[completeIdx].Trim() != "1") continue;
+
+        var runes = new List<string>();
+        for (int r = 0; r < 6; r++)
+        {
+            var rune = cols[rune1Idx + r].Trim();
+            if (rune.Length > 0) runes.Add(rune);
+        }
+        if (runes.Count == 0) continue;
+        var key = string.Join(",", runes);
+
+        var ranges = ParseStatRangesFromProps(cols, propStart, 7, 4);
+        if (ranges.Count > 0 && !lookup.ContainsKey(key))
+            lookup[key] = ranges;
     }
 
     return lookup;
