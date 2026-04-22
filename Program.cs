@@ -14,10 +14,32 @@ var defaultSaveDir = config.GetValueOrDefault("save_dir",
     Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         "Saved Games", "Diablo II Resurrected"));
 
-var fileArgs = args.ToList();
+// Check for --monitor mode
+if (args.Length >= 2 && args[0] == "--monitor")
+{
+    var monitorCharName = args[1];
+    var monitorFile = Path.Combine(defaultSaveDir, $"{monitorCharName}.d2s");
+    if (!File.Exists(monitorFile))
+    {
+        // Try as a direct path
+        if (File.Exists(monitorCharName))
+            monitorFile = monitorCharName;
+        else
+        {
+            Console.WriteLine($"File not found: {monitorFile}");
+            return;
+        }
+    }
+    // Need to load lookups before monitoring - fall through to load them,
+    // then run monitor mode after
+    args = new[] { "__monitor__", monitorFile };
+}
+
+var fileArgs = args.Where(a => a != "__monitor__").ToList();
+var isMonitorMode = args.Length >= 1 && args[0] == "__monitor__";
 
 // Default to the configured save directory if no files specified
-if (fileArgs.Count == 0)
+if (!isMonitorMode && fileArgs.Count == 0)
 {
     if (Directory.Exists(defaultSaveDir))
     {
@@ -26,7 +48,7 @@ if (fileArgs.Count == 0)
     }
     else
     {
-        Console.WriteLine("Usage: d2sitems [file.d2s|file.d2i|dir] ...");
+        Console.WriteLine("Usage: d2sitems [--monitor <charactername>] [file.d2s|file.d2i|dir] ...");
         Console.WriteLine($"Default directory not found: {defaultSaveDir}");
         return;
     }
@@ -69,6 +91,65 @@ var jsonOptions = new JsonSerializerOptions
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
 };
+
+// Monitor mode: watch a character for new unique/set items
+if (isMonitorMode)
+{
+    var monitorFile = fileArgs[0];
+    var monitorInterval = int.TryParse(config.GetValueOrDefault("monitor_interval", "5"), out var mi) ? mi : 5;
+    Console.WriteLine($"Monitoring {monitorFile} for new unique/set items every {monitorInterval}s (Ctrl+C to stop)...");
+
+    HashSet<string> previousItems = new();
+    bool firstRun = true;
+
+    while (true)
+    {
+        try
+        {
+            byte[] saveBytes = File.ReadAllBytes(monitorFile);
+            D2Save save = D2Save.Read(saveBytes);
+
+            var allItems = new List<Item>(save.Items);
+            if (save.MercItems != null)
+                foreach (var item in save.MercItems.Items)
+                    allItems.Add(item);
+
+            // Collect current unique/set item names
+            var currentItems = new HashSet<string>();
+            foreach (var item in allItems)
+            {
+                if (item.Quality is ItemQuality.Unique or ItemQuality.Set)
+                    currentItems.Add(GetItemDisplayName(item));
+            }
+
+            if (!firstRun)
+            {
+                foreach (var name in currentItems)
+                {
+                    if (!previousItems.Contains(name))
+                    {
+                        var timestamp = DateTime.Now.ToString("HH:mm:ss");
+                        Console.WriteLine($"[{timestamp}] NEW ITEM DETECTED: {name}");
+                    }
+                }
+            }
+            else
+            {
+                Console.WriteLine($"Loaded {currentItems.Count} unique/set items. Watching for changes...");
+                firstRun = false;
+            }
+
+            previousItems = currentItems;
+        }
+        catch (Exception ex)
+        {
+            // File might be locked during save, just skip this cycle
+            Console.WriteLine($"  (read error, retrying: {ex.Message})");
+        }
+
+        Thread.Sleep(monitorInterval * 1000);
+    }
+}
 
 foreach (var saveFile in saveFiles)
 {
