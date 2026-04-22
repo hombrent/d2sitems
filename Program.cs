@@ -1415,7 +1415,11 @@ Dictionary<string, string> LoadConfig(string filename)
             var key = trimmed[..eqIdx].Trim();
             var value = trimmed[(eqIdx + 1)..].Trim();
             if (key.Length > 0 && value.Length > 0)
+            {
+                if (value.StartsWith("~"))
+                    value = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) + value[1..];
                 config[key] = value;
+            }
         }
         break; // use the first config file found
     }

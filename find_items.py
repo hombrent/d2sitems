@@ -26,6 +26,8 @@ def load_config(filename="d2sitems.conf"):
                 key, _, value = line.partition('=')
                 key, value = key.strip(), value.strip()
                 if key and value:
+                    if value.startswith("~"):
+                        value = os.path.expanduser("~") + value[1:]
                     config[key] = value
         break  # use the first config file found
     return config
