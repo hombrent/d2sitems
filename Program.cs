@@ -8,25 +8,13 @@ using System.Text.RegularExpressions;
 // Load config file (looks next to the executable, then in the current directory)
 var config = LoadConfig("d2sitems.conf");
 
-// Parse --excel option (command line overrides config, config overrides built-in default)
 var excelDir = config.GetValueOrDefault("excel_dir",
     @"C:\Program Files (x86)\Diablo II Resurrected\data\global\excel");
 var defaultSaveDir = config.GetValueOrDefault("save_dir",
     Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         "Saved Games", "Diablo II Resurrected"));
 
-var fileArgs = new List<string>();
-for (int i = 0; i < args.Length; i++)
-{
-    if (args[i] == "--excel" && i + 1 < args.Length)
-    {
-        excelDir = args[++i];
-    }
-    else
-    {
-        fileArgs.Add(args[i]);
-    }
-}
+var fileArgs = args.ToList();
 
 // Default to the configured save directory if no files specified
 if (fileArgs.Count == 0)
@@ -38,7 +26,7 @@ if (fileArgs.Count == 0)
     }
     else
     {
-        Console.WriteLine("Usage: d2sitems [--excel <path>] [file.d2s|file.d2i|dir] ...");
+        Console.WriteLine("Usage: d2sitems [file.d2s|file.d2i|dir] ...");
         Console.WriteLine($"Default directory not found: {defaultSaveDir}");
         return;
     }

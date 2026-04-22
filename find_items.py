@@ -135,8 +135,12 @@ def matches_all_filters(item, filters):
             return False
     return True
 
-def print_item(source, filename, item):
+def print_item(source, filename, item, is_mule=False):
     print(f"[Character: {source}] (file: {filename})")
+    if is_mule:
+        print(f"  **** MULE ****")
+        print(f"  ****** You must fetch this character before you can use it by running ******")
+        print(f"  ******** .\\fetch.py {source} ********")
     print(f"  Name: {item.get('name', '?')}")
     print(f"  Location: {item.get('location', '?')}")
     if "itemLevel" in item:
@@ -170,7 +174,7 @@ def print_item(source, filename, item):
         print(f"  Sockets [{item.get('socketCount', '?')}]: {', '.join(socket_names)}")
     print()
 
-def search_items(directory, filters, core_filter, gameversion_filter):
+def search_items(directory, filters, core_filter, gameversion_filter, is_mule=False):
     for filename in sorted(os.listdir(directory)):
         if not filename.endswith(".json"):
             continue
@@ -196,7 +200,7 @@ def search_items(directory, filters, core_filter, gameversion_filter):
 
         for item in data.get("items", []):
             if matches_all_filters(item, filters):
-                print_item(source, save_file, item)
+                print_item(source, save_file, item, is_mule)
 
 ALL_RESIST_ELEMENTS = ["fire", "cold", "lightning", "poison"]
 
@@ -253,13 +257,11 @@ if __name__ == "__main__":
                '  find_items.py --base Amulet --ilvl ">=90" --quality Magic   # Amulets for crafting\n',
         formatter_class=argparse.RawDescriptionHelpFormatter)
     config = load_config()
-    default_dir = config.get("save_dir",
+    save_dir = config.get("save_dir",
         os.path.join(os.path.expanduser("~"), "Saved Games", "Diablo II Resurrected"))
 
     parser.add_argument("pattern", nargs="?", default=None,
                         help="regex pattern to match item names (shorthand for --name)")
-    parser.add_argument("-d", "--directory", default=default_dir,
-                        help=f"directory containing JSON files (default: {default_dir})")
 
     # Add a named argument for each searchable field
     for field in TEXT_FIELDS:
@@ -308,5 +310,9 @@ if __name__ == "__main__":
         filters.append(("name", re.compile("Infinity", re.IGNORECASE), False))
 
     core_filter = args.core or config.get("core", "both")
-    gameversion_filter = args.gameversion or config.get("gameversion", "all")
-    search_items(args.directory, filters, core_filter, gameversion_filter)
+    gameversion_filter = args.gameversion or config.get("game_version", "all")
+
+    search_items(save_dir, filters, core_filter, gameversion_filter)
+    mule_dir = config.get("mule_dir")
+    if mule_dir and os.path.isdir(mule_dir):
+        search_items(mule_dir, filters, core_filter, gameversion_filter, is_mule=True)
