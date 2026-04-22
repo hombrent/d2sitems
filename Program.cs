@@ -142,26 +142,30 @@ if (isMonitorMode)
                         var scoreStr = score.HasValue ? $" (Perfection: {score:F2}%)" : "";
                         Console.Beep();
                         Console.WriteLine($"[{timestamp}] NEW ITEM DETECTED: {name}{scoreStr}");
+                        if (score.HasValue) {
 
-                        // Print stats with ranges
-                        if (item.Defense.HasValue)
-                        {
-                            var baseRange = GetBaseDefenseRange(item.ItemCodeString);
-                            if (baseRange != null)
-                                Console.WriteLine($"  Defense: {item.Defense} (base: {baseRange})");
-                            else
-                                Console.WriteLine($"  Defense: {item.Defense}");
-                        }
-                        var allMonStats = new List<Stat>();
-                        if (item.RunewordStats != null) allMonStats.AddRange(item.RunewordStats);
-                        if (item.Stats != null) allMonStats.AddRange(item.Stats);
-                        foreach (var stat in allMonStats)
-                        {
-                            var text = FormatStat(stat);
-                            if (statRanges != null && statRanges.TryGetValue(((int)stat.Id, stat.Layer), out var range) && range.Min != range.Max)
-                                Console.WriteLine($"  {text} [{range.Min}-{range.Max}]");
-                            else
-                                Console.WriteLine($"  {text}");
+                            // Print stats with ranges
+                            if (item.Defense.HasValue)
+                            {
+                                var baseRange = GetBaseDefenseRange(item.ItemCodeString);
+                                if (baseRange != null)
+                                    Console.WriteLine($"  Defense: {item.Defense} (base: {baseRange})");
+                                else
+                                    Console.WriteLine($"  Defense: {item.Defense}");
+                            }
+                            var allMonStats = new List<Stat>();
+                            if (item.RunewordStats != null) allMonStats.AddRange(item.RunewordStats);
+                            if (item.Stats != null) allMonStats.AddRange(item.Stats);
+                            foreach (var stat in allMonStats)
+                            {
+                                var text = FormatStat(stat);
+                                if (statRanges != null && statRanges.TryGetValue(((int)stat.Id, stat.Layer), out var range) && range.Min != range.Max)
+                                    Console.WriteLine($"  {text} [{range.Min}-{range.Max}]");
+                                else
+                                    Console.WriteLine($"  {text}");
+                            }
+                        } else {
+                            Console.WriteLine($"  This item does not have a score.");
                         }
 
                         // Find existing copies across all saves
@@ -204,21 +208,14 @@ if (isMonitorMode)
                                         }
                                     }
                                 }
+                                if (isBest)
+                                    Console.WriteLine($"************** This is the best one! ***************");
                             }
                         }
                         else
                         {
-                            Console.WriteLine($"  This is your first one!");
+                            Console.WriteLine($"************** This is your first one! ***************");
                             isBest = true;
-                        }
-
-                        if (isBest)
-                        {
-                            for (int b = 0; b < 9; b++)
-                            {
-                                Thread.Sleep(200);
-                                Console.Beep();
-                            }
                         }
                     }
                 }
