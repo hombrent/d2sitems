@@ -48,6 +48,7 @@ if __name__ == "__main__":
         if os.path.exists(path):
             os.utime(path, None)
             mtime = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(os.path.getmtime(path)))
-            print(f"Touched {path} ({mtime})")
+            print(f"Brought forth {name} by touching {path}")
+            print("You may have to quit the game and relaunch for the game to notice")
         else:
             print(f"File not found: {path}")
