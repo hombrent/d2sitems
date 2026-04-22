@@ -170,13 +170,24 @@ def print_item(source, filename, item):
         print(f"  Sockets [{item.get('socketCount', '?')}]: {', '.join(socket_names)}")
     print()
 
-def search_items(directory, filters):
+def search_items(directory, filters, core_filter, gameversion_filter):
     for filename in sorted(os.listdir(directory)):
         if not filename.endswith(".json"):
             continue
         filepath = os.path.join(directory, filename)
         with open(filepath) as f:
             data = json.load(f)
+
+        # Filter by core and gameversion settings (skip shared stash since it has neither)
+        char = data.get("character", {})
+        if core_filter != "both":
+            char_core = char.get("core", "")
+            if char_core and char_core != core_filter:
+                continue
+        if gameversion_filter != "all":
+            char_gv = char.get("gameVersion", "")
+            if char_gv and char_gv.lower() != gameversion_filter.lower():
+                continue
 
         source = data.get("character", {}).get("name", filename)
         if "type" in data and data["type"] == "SharedStash":
@@ -261,6 +272,10 @@ if __name__ == "__main__":
     # Shorthand boolean flags
     parser.add_argument("--ethereal", action="store_true", help="only Ethereal items")
     parser.add_argument("--notethereal", action="store_true", help="only non-Ethereal items")
+    parser.add_argument("--core", choices=["hard", "soft", "both"], default=None,
+                        help="filter by hardcore/softcore (overrides config, default: both)")
+    parser.add_argument("--gameversion", default=None,
+                        help="filter by game version: Classic, Expansion, ReignOfTheWarlock, or all (overrides config, default: all)")
 
     args = parser.parse_args()
 
@@ -292,4 +307,6 @@ if __name__ == "__main__":
     if not filters:
         filters.append(("name", re.compile("Infinity", re.IGNORECASE), False))
 
-    search_items(args.directory, filters)
+    core_filter = args.core or config.get("core", "both")
+    gameversion_filter = args.gameversion or config.get("gameversion", "all")
+    search_items(args.directory, filters, core_filter, gameversion_filter)

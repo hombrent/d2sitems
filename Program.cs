@@ -148,7 +148,9 @@ void ProcessCharacterSave(string saveFile, byte[] saveBytes)
         {
             ["name"] = save.Character.Preview.Name,
             ["level"] = save.Character.Level,
-            ["class"] = save.Character.Class.ToString()
+            ["class"] = save.Character.Class.ToString(),
+            ["gameVersion"] = save.Character.Preview.GameVersion.ToString(),
+            ["core"] = save.Character.Flags.HasFlag(CharacterFlags.Hardcore) ? "hard" : "soft"
         },
         ["stats"] = BuildCharStatsJson(save),
         ["items"] = equipped.Concat(belt).Concat(inventory).Concat(stash).Concat(cube).Concat(merc)
