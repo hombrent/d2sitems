@@ -175,6 +175,10 @@ def print_item(source, filename, item, is_mule=False):
     print()
 
 def search_items(directory, filters, core_filter, gameversion_filter, is_mule=False):
+    """Search for matching items. Returns list of (source, save_file, item, is_mule) tuples."""
+    results = []
+    if not os.path.isdir(directory):
+        return results
     for filename in sorted(os.listdir(directory)):
         if not filename.endswith(".json"):
             continue
@@ -200,7 +204,8 @@ def search_items(directory, filters, core_filter, gameversion_filter, is_mule=Fa
 
         for item in data.get("items", []):
             if matches_all_filters(item, filters):
-                print_item(source, save_file, item, is_mule)
+                results.append((source, save_file, item, is_mule))
+    return results
 
 ALL_RESIST_ELEMENTS = ["fire", "cold", "lightning", "poison"]
 
@@ -278,6 +283,8 @@ if __name__ == "__main__":
                         help="filter by hardcore/softcore (overrides config, default: both)")
     parser.add_argument("--gameversion", default=None,
                         help="filter by game version: Classic, Expansion, ReignOfTheWarlock, or all (overrides config, default: all)")
+    parser.add_argument("--json", action="store_true",
+                        help="output results as JSON instead of human-readable text")
 
     args = parser.parse_args()
 
@@ -312,7 +319,20 @@ if __name__ == "__main__":
     core_filter = args.core or config.get("core", "both")
     gameversion_filter = args.gameversion or config.get("game_version", "all")
 
-    search_items(save_dir, filters, core_filter, gameversion_filter)
+    results = search_items(save_dir, filters, core_filter, gameversion_filter)
     mule_dir = config.get("mule_dir")
     if mule_dir and os.path.isdir(mule_dir):
-        search_items(mule_dir, filters, core_filter, gameversion_filter, is_mule=True)
+        results += search_items(mule_dir, filters, core_filter, gameversion_filter, is_mule=True)
+
+    if args.json:
+        json_results = []
+        for source, save_file, item, is_mule in results:
+            entry = dict(item)
+            entry["character"] = source
+            entry["file"] = save_file
+            entry["isMule"] = is_mule
+            json_results.append(entry)
+        print(json.dumps(json_results, indent=2, ensure_ascii=False))
+    else:
+        for source, save_file, item, is_mule in results:
+            print_item(source, save_file, item, is_mule)

@@ -1,5 +1,6 @@
 using D2SSharp.Model;
 using D2SSharp.Enums;
+using System.Diagnostics;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -99,7 +100,11 @@ if (isMonitorMode)
     var monitorInterval = int.TryParse(config.GetValueOrDefault("monitor_interval", "5"), out var mi) ? mi : 5;
     Console.WriteLine($"Monitoring {monitorFile} for new unique/set items every {monitorInterval}s (Ctrl+C to stop)...");
 
-    HashSet<string> previousItems = new();
+    var findScript = Path.Combine(Directory.GetCurrentDirectory(), "find_items.py");
+    if (!File.Exists(findScript))
+        findScript = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "find_items.py");
+
+    Dictionary<string, Item> previousItems = new();
     bool firstRun = true;
 
     while (true)
@@ -114,22 +119,36 @@ if (isMonitorMode)
                 foreach (var item in save.MercItems.Items)
                     allItems.Add(item);
 
-            // Collect current unique/set item names
-            var currentItems = new HashSet<string>();
+            // Collect current unique/set items by name
+            var currentItems = new Dictionary<string, Item>();
             foreach (var item in allItems)
             {
                 if (item.Quality is ItemQuality.Unique or ItemQuality.Set)
-                    currentItems.Add(GetItemDisplayName(item));
+                {
+                    var name = GetItemDisplayName(item);
+                    currentItems.TryAdd(name, item);
+                }
             }
 
             if (!firstRun)
             {
-                foreach (var name in currentItems)
+                foreach (var (name, item) in currentItems)
                 {
-                    if (!previousItems.Contains(name))
+                    if (!previousItems.ContainsKey(name))
                     {
                         var timestamp = DateTime.Now.ToString("HH:mm:ss");
-                        Console.WriteLine($"[{timestamp}] NEW ITEM DETECTED: {name}");
+                        var statRanges = GetStatRangesForItem(item);
+                        var score = CalculatePerfectionScore(item, statRanges);
+                        var scoreStr = score.HasValue ? $" (Perfection: {score:F2}%)" : "";
+                        Console.Beep();
+                        Console.WriteLine($"[{timestamp}] NEW ITEM DETECTED: {name}{scoreStr}");
+
+                        // Count how many of this item we already have across all saves
+                        var count = CountExistingItems(name, findScript);
+                        if (count > 0)
+                            Console.WriteLine($"  You already have {count} of this item.");
+                        else
+                            Console.WriteLine($"  This is your first one!");
                     }
                 }
             }
@@ -171,6 +190,48 @@ foreach (var saveFile in saveFiles)
     else
     {
         ProcessCharacterSave(saveFile, saveBytes);
+    }
+}
+
+int CountExistingItems(string itemName, string findScript)
+{
+    try
+    {
+        var escapedName = $"^{Regex.Escape(itemName)}$";
+        var psi = new ProcessStartInfo
+        {
+            FileName = "python3",
+            ArgumentList = { findScript, "--name", escapedName, "--json" },
+            UseShellExecute = false,
+            RedirectStandardOutput = true
+        };
+        var proc = Process.Start(psi);
+        if (proc == null) return 0;
+        var output = proc.StandardOutput.ReadToEnd();
+        proc.WaitForExit();
+        var results = JsonSerializer.Deserialize<JsonElement>(output);
+        return results.GetArrayLength();
+    }
+    catch
+    {
+        try
+        {
+            var escapedName = $"^{Regex.Escape(itemName)}$";
+            var psi = new ProcessStartInfo
+            {
+                FileName = "python",
+                ArgumentList = { findScript, "--name", escapedName, "--json" },
+                UseShellExecute = false,
+                RedirectStandardOutput = true
+            };
+            var proc = Process.Start(psi);
+            if (proc == null) return 0;
+            var output = proc.StandardOutput.ReadToEnd();
+            proc.WaitForExit();
+            var results = JsonSerializer.Deserialize<JsonElement>(output);
+            return results.GetArrayLength();
+        }
+        catch { return 0; }
     }
 }
 
