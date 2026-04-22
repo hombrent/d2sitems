@@ -149,6 +149,8 @@ def print_item(source, filename, item):
         print(f"  Tier: {item['tier']}")
     if item.get("set"):
         print(f"  Set: {item['set']}")
+    if "perfectionScore" in item:
+        print(f"  Perfection: {item['perfectionScore']}%")
     if "flags" in item:
         print(f"  Flags: {', '.join(item['flags'])}")
     if "defense" in item:
