@@ -185,25 +185,11 @@ if (isMonitorMode)
 
     Dictionary<string, Item> previousItems = new();
     bool firstRun = true;
-    int loopCount = 0;
 
     while (true)
     {
         try
         {
-            // Every 5 loops, reprocess the shared stash JSON
-            var stashRefreshMultiple = int.TryParse(config.GetValueOrDefault("stash_refresh_loop_multiple", "5"), out var srm) ? srm : 5;
-            if (monitorStashFile != null && stashRefreshMultiple > 0 && loopCount % stashRefreshMultiple == 0)
-            {
-                try
-                {
-                    var stashBytes = File.ReadAllBytes(monitorStashFile);
-                    ProcessSharedStash(monitorStashFile, stashBytes);
-                }
-                catch { }
-            }
-            loopCount++;
-
             byte[] saveBytes = File.ReadAllBytes(monitorFile);
             D2Save save = D2Save.Read(saveBytes);
 
@@ -259,6 +245,17 @@ if (isMonitorMode)
                                     Console.WriteLine($"  {text}");
                             }
                         } 
+
+                        // Refresh shared stash JSON before searching
+                        if (monitorStashFile != null)
+                        {
+                            try
+                            {
+                                var stashBytes = File.ReadAllBytes(monitorStashFile);
+                                ProcessSharedStash(monitorStashFile, stashBytes);
+                            }
+                            catch { }
+                        }
 
                         // Find existing copies across all saves
                         var existing = FindExistingItems(name, findScript);
