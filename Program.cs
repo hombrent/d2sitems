@@ -174,43 +174,41 @@ if (isMonitorMode)
                         if (existing.Count > 0)
                         {
                             Console.WriteLine($"  You already have {existing.Count} of this item.");
-                            if (score.HasValue)
+                            isBest = true;
+                            foreach (var copy in existing)
                             {
-                                isBest = true;
-                                foreach (var copy in existing)
+                                var charName = copy.TryGetProperty("character", out var cn) ? cn.GetString() : "?";
+                                if (copy.TryGetProperty("perfectionScore", out var ps))
                                 {
-                                    var charName = copy.TryGetProperty("character", out var cn) ? cn.GetString() : "?";
-                                    if (copy.TryGetProperty("perfectionScore", out var ps))
+                                    var copyScore = ps.GetDouble();
+                                    var scoreVal = score!.Value;
+                                    var comparison = scoreVal > copyScore ? "THIS ONE IS BETTER"
+                                        : scoreVal < copyScore ? "this one is worse"
+                                        : "same score";
+                                    Console.WriteLine($"    Copy on {charName} scored {copyScore:F2}%. {comparison}.");
+                                    if (copyScore >= scoreVal)
+                                        isBest = false;
+                                }
+                                else
+                                {
+                                    Console.WriteLine($"    Copy on {charName} (no score).");
+                                }
+                                // Print stats of existing copy
+                                foreach (var statList in new[] { "runewordStats", "stats" })
+                                {
+                                    if (copy.TryGetProperty(statList, out var stats))
                                     {
-                                        var copyScore = ps.GetDouble();
-                                        var comparison = score.Value > copyScore ? "THIS ONE IS BETTER"
-                                            : score.Value < copyScore ? "this one is worse"
-                                            : "same score";
-                                        Console.WriteLine($"    Copy on {charName} scored {copyScore:F2}%. {comparison}.");
-                                        if (copyScore >= score.Value)
-                                            isBest = false;
-                                    }
-                                    else
-                                    {
-                                        Console.WriteLine($"    Copy on {charName} (no score).");
-                                    }
-                                    // Print stats of existing copy
-                                    foreach (var statList in new[] { "runewordStats", "stats" })
-                                    {
-                                        if (copy.TryGetProperty(statList, out var stats))
+                                        foreach (var s in stats.EnumerateArray())
                                         {
-                                            foreach (var s in stats.EnumerateArray())
-                                            {
-                                                var desc = s.TryGetProperty("description", out var d) ? d.GetString() : "?";
-                                                var rangeStr = s.TryGetProperty("range", out var r) ? $" [{r.GetString()}]" : "";
-                                                Console.WriteLine($"      {desc}{rangeStr}");
-                                            }
+                                            var desc = s.TryGetProperty("description", out var d) ? d.GetString() : "?";
+                                            var rangeStr = s.TryGetProperty("range", out var r) ? $" [{r.GetString()}]" : "";
+                                            Console.WriteLine($"      {desc}{rangeStr}");
                                         }
                                     }
                                 }
-                                if (isBest)
-                                    Console.WriteLine($"************** This is the best one! ***************");
                             }
+                            if (isBest)
+                                Console.WriteLine($"************** This is the best one! ***************");
                         }
                         else
                         {
