@@ -69,6 +69,7 @@ foreach (var arg in fileArgs)
 }
 
 // Build lookups from game_files/default/excel (shared across all files)
+int missingFileCount = 0;
 var itemNames = BuildItemNameLookup(excelDir);
 var skillNames = BuildSkillNameLookup(excelDir);
 var runewordsByRunes = BuildRunewordLookup(excelDir);
@@ -86,12 +87,46 @@ var uniqueStatRanges = BuildUniqueStatRangesLookup(excelDir);
 var setStatRanges = BuildSetStatRangesLookup(excelDir);
 var runewordStatRanges = BuildRunewordStatRangesLookup(excelDir);
 
+if (missingFileCount > 0)
+{
+    Console.Write($"{missingFileCount} game file(s) could not be loaded. Continue anyway? (y/n) ");
+    var response = Console.ReadLine()?.Trim().ToLowerInvariant();
+    if (response != "y" && response != "yes")
+    {
+        Console.WriteLine("Exiting.");
+        return;
+    }
+}
+
 var jsonOptions = new JsonSerializerOptions
 {
     WriteIndented = true,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
 };
+
+// Process all save and stash files
+Console.WriteLine($"Processing {saveFiles.Count} save and stash files");
+foreach (var saveFile in saveFiles)
+{
+    if (!File.Exists(saveFile))
+    {
+        Console.WriteLine($"  File not found: {saveFile}");
+        continue;
+    }
+
+    var ext = Path.GetExtension(saveFile).ToLowerInvariant();
+    byte[] saveBytes = File.ReadAllBytes(saveFile);
+
+    if (ext == ".d2i")
+    {
+        ProcessSharedStash(saveFile, saveBytes);
+    }
+    else
+    {
+        ProcessCharacterSave(saveFile, saveBytes);
+    }
+}
 
 // Monitor mode: watch a character for new unique/set items
 if (isMonitorMode)
@@ -238,29 +273,6 @@ if (isMonitorMode)
     }
 }
 
-foreach (var saveFile in saveFiles)
-{
-    Console.WriteLine($"Processing {saveFile}...");
-
-    if (!File.Exists(saveFile))
-    {
-        Console.WriteLine($"  File not found: {saveFile}");
-        continue;
-    }
-
-    var ext = Path.GetExtension(saveFile).ToLowerInvariant();
-    byte[] saveBytes = File.ReadAllBytes(saveFile);
-
-    if (ext == ".d2i")
-    {
-        ProcessSharedStash(saveFile, saveBytes);
-    }
-    else
-    {
-        ProcessCharacterSave(saveFile, saveBytes);
-    }
-}
-
 List<JsonElement> FindExistingItems(string itemName, string findScript)
 {
     var pythonCmd = config.GetValueOrDefault("python", "python");
@@ -344,7 +356,7 @@ void ProcessCharacterSave(string saveFile, byte[] saveBytes)
 
     var jsonPath = Path.ChangeExtension(saveFile, ".json");
     File.WriteAllText(jsonPath, JsonSerializer.Serialize(jsonData, jsonOptions));
-    Console.WriteLine($"  JSON written to {jsonPath}");
+    // Console.WriteLine($"  JSON written to {jsonPath}");
 }
 
 void ProcessSharedStash(string saveFile, byte[] saveBytes)
@@ -365,11 +377,19 @@ void ProcessSharedStash(string saveFile, byte[] saveBytes)
 
     // ── Write JSON output ──
 
+    // Determine core and gameVersion from filename
+    var fileName = Path.GetFileNameWithoutExtension(saveFile);
+    var core = fileName.Contains("HardCore", StringComparison.OrdinalIgnoreCase) ? "hard" : "soft";
+    var gameVersion = fileName.StartsWith("Modern", StringComparison.OrdinalIgnoreCase)
+        ? "ReignOfTheWarlock" : "Expansion";
+
     var allItems = tabItems.SelectMany(t => t.Items).Select(BuildItemJson).ToList();
     var jsonData = new Dictionary<string, object>
     {
         ["file"] = Path.GetFileName(saveFile),
         ["type"] = "SharedStash",
+        ["core"] = core,
+        ["gameVersion"] = gameVersion,
         ["tabs"] = tabItems.Select(t => new Dictionary<string, object>
         {
             ["name"] = t.TabName,
@@ -381,7 +401,7 @@ void ProcessSharedStash(string saveFile, byte[] saveBytes)
 
     var jsonPath = Path.ChangeExtension(saveFile, ".json");
     File.WriteAllText(jsonPath, JsonSerializer.Serialize(jsonData, jsonOptions));
-    Console.WriteLine($"  JSON written to {jsonPath}");
+    // Console.WriteLine($"  JSON written to {jsonPath}");
 }
 
 
@@ -963,7 +983,7 @@ Dictionary<string, string> BuildItemNameLookup(string dir)
     foreach (var file in new[] { "armor.txt", "weapons.txt", "misc.txt" })
     {
         var path = Path.Combine(dir, file);
-        if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); continue; }
+        if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); missingFileCount++; continue; }
 
         var lines = File.ReadAllLines(path);
         if (lines.Length < 2) continue;
@@ -993,7 +1013,7 @@ Dictionary<int, string> BuildSkillNameLookup(string dir)
 {
     var lookup = new Dictionary<int, string>();
     var path = Path.Combine(dir, "skills.txt");
-    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); return lookup; }
+    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); missingFileCount++; return lookup; }
 
     var lines = File.ReadAllLines(path);
     if (lines.Length < 2) return lookup;
@@ -1023,7 +1043,7 @@ Dictionary<string, string> BuildRunewordLookup(string dir)
     // Maps "r31,r06,r30" -> "Enigma" (rune code combo -> runeword name)
     var lookup = new Dictionary<string, string>();
     var path = Path.Combine(dir, "runes.txt");
-    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); return lookup; }
+    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); missingFileCount++; return lookup; }
 
     var lines = File.ReadAllLines(path);
     if (lines.Length < 2) return lookup;
@@ -1077,7 +1097,7 @@ Dictionary<int, string> BuildSetItemNameLookup(string dir)
 Dictionary<int, string> BuildIndexedNameLookup(string path)
 {
     var lookup = new Dictionary<int, string>();
-    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); return lookup; }
+    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); missingFileCount++; return lookup; }
 
     var lines = File.ReadAllLines(path);
     if (lines.Length < 2) return lookup;
@@ -1110,7 +1130,7 @@ Dictionary<string, int> BuildGemApplyTypeLookup(string dir)
     foreach (var file in new[] { "armor.txt", "weapons.txt" })
     {
         var path = Path.Combine(dir, file);
-        if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); continue; }
+        if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); missingFileCount++; continue; }
 
         var lines = File.ReadAllLines(path);
         if (lines.Length < 2) continue;
@@ -1139,7 +1159,7 @@ Dictionary<string, GemModSet> BuildGemStatsLookup(string dir)
 {
     var lookup = new Dictionary<string, GemModSet>(StringComparer.OrdinalIgnoreCase);
     var path = Path.Combine(dir, "gems.txt");
-    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); return lookup; }
+    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); missingFileCount++; return lookup; }
 
     var lines = File.ReadAllLines(path);
     if (lines.Length < 2) return lookup;
@@ -1188,7 +1208,7 @@ Dictionary<string, List<PropertyEntry>> BuildPropertyToStatsLookup(string dir)
 {
     var lookup = new Dictionary<string, List<PropertyEntry>>(StringComparer.OrdinalIgnoreCase);
     var path = Path.Combine(dir, "properties.txt");
-    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); return lookup; }
+    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); missingFileCount++; return lookup; }
 
     var lines = File.ReadAllLines(path);
     if (lines.Length < 2) return lookup;
@@ -1232,7 +1252,7 @@ Dictionary<string, int> BuildStatNameToIdLookup(string dir)
 {
     var lookup = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
     var path = Path.Combine(dir, "itemstatcost.txt");
-    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); return lookup; }
+    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); missingFileCount++; return lookup; }
 
     var lines = File.ReadAllLines(path);
     if (lines.Length < 2) return lookup;
@@ -1288,7 +1308,7 @@ Dictionary<string, string> BuildItemTypeLookup(string dir)
     }
     else
     {
-        Console.WriteLine($"Warning: game file not found: {typesPath}");
+        Console.WriteLine($"Warning: game file not found: {typesPath}"); missingFileCount++;
     }
 
     // Then map item code -> type name via armor/weapons/misc type columns
@@ -1332,7 +1352,7 @@ Dictionary<int, string> BuildSetItemSetNameLookup(string dir)
 {
     var lookup = new Dictionary<int, string>();
     var path = Path.Combine(dir, "setitems.txt");
-    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); return lookup; }
+    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); missingFileCount++; return lookup; }
 
     var lines = File.ReadAllLines(path);
     if (lines.Length < 2) return lookup;
@@ -1361,7 +1381,7 @@ Dictionary<string, string> BuildItemDefenseRangeLookup(string dir)
 {
     var lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     var path = Path.Combine(dir, "armor.txt");
-    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); return lookup; }
+    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); missingFileCount++; return lookup; }
 
     var lines = File.ReadAllLines(path);
     if (lines.Length < 2) return lookup;
@@ -1392,7 +1412,7 @@ Dictionary<string, string> BuildItemTierLookup(string dir)
     foreach (var file in new[] { "armor.txt", "weapons.txt" })
     {
         var path = Path.Combine(dir, file);
-        if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); continue; }
+        if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); missingFileCount++; continue; }
 
         var lines = File.ReadAllLines(path);
         if (lines.Length < 2) continue;
