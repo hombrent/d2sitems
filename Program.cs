@@ -105,6 +105,22 @@ var jsonOptions = new JsonSerializerOptions
     Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
 };
 
+// In monitor mode, process all files in save_dir and mule_dir
+if (isMonitorMode)
+{
+    saveFiles.Clear();
+    if (Directory.Exists(defaultSaveDir))
+    {
+        saveFiles.AddRange(Directory.GetFiles(defaultSaveDir, "*.d2s"));
+        saveFiles.AddRange(Directory.GetFiles(defaultSaveDir, "*.d2i"));
+    }
+    var muleDir = config.GetValueOrDefault("mule_dir", "");
+    if (muleDir.Length > 0 && Directory.Exists(muleDir))
+    {
+        saveFiles.AddRange(Directory.GetFiles(muleDir, "*.d2s"));
+    }
+}
+
 // Process all save and stash files
 Console.WriteLine($"Processing {saveFiles.Count} save and stash files");
 foreach (var saveFile in saveFiles)
@@ -139,6 +155,28 @@ if (isMonitorMode)
     bool beepOnFound = beepSettings.Contains("found");
     bool beepOnBest = beepOnFound ? false : beepSettings.Contains("best");
     bool beepOnNew = beepOnFound ? false : beepSettings.Contains("new");
+    // Determine the matching shared stash file for this character
+    string? monitorStashFile = null;
+    try
+    {
+        var initBytes = File.ReadAllBytes(monitorFile);
+        var initSave = D2Save.Read(initBytes);
+        var charGameVersion = initSave.Character.Preview.GameVersion.ToString();
+        var charCore = initSave.Character.Flags.HasFlag(CharacterFlags.Hardcore) ? "HardCore" : "SoftCore";
+        var stashPrefix = charGameVersion == "ReignOfTheWarlock" ? "Modern" : "";
+        var stashName = $"{stashPrefix}SharedStash{charCore}V2.d2i";
+        var stashPath = Path.Combine(defaultSaveDir, stashName);
+        if (File.Exists(stashPath))
+        {
+            monitorStashFile = stashPath;
+            Console.WriteLine($"Also refreshing shared stash: {Path.GetFileName(monitorStashFile)}");
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Warning: could not read character for stash detection: {ex.Message}");
+    }
+
     Console.WriteLine($"Monitoring {monitorFile} for new unique/set items every {monitorInterval}s (Ctrl+C to stop)...");
 
     var findScript = Path.Combine(Directory.GetCurrentDirectory(), "find_items.py");
@@ -147,11 +185,25 @@ if (isMonitorMode)
 
     Dictionary<string, Item> previousItems = new();
     bool firstRun = true;
+    int loopCount = 0;
 
     while (true)
     {
         try
         {
+            // Every 5 loops, reprocess the shared stash JSON
+            var stashRefreshMultiple = int.TryParse(config.GetValueOrDefault("stash_refresh_loop_multiple", "5"), out var srm) ? srm : 5;
+            if (monitorStashFile != null && stashRefreshMultiple > 0 && loopCount % stashRefreshMultiple == 0)
+            {
+                try
+                {
+                    var stashBytes = File.ReadAllBytes(monitorStashFile);
+                    ProcessSharedStash(monitorStashFile, stashBytes);
+                }
+                catch { }
+            }
+            loopCount++;
+
             byte[] saveBytes = File.ReadAllBytes(monitorFile);
             D2Save save = D2Save.Read(saveBytes);
 
