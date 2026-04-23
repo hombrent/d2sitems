@@ -139,7 +139,7 @@ if (isMonitorMode)
                         var timestamp = DateTime.Now.ToString("HH:mm:ss");
                         var statRanges = GetStatRangesForItem(item);
                         var score = CalculatePerfectionScore(item, statRanges);
-                        var scoreStr = score.HasValue ? $" (Perfection: {score:F2}%)" : "";
+                        var scoreStr = score.HasValue ? $" - (Perfection: {score:F2}%)" : " - (No Perfection Score)";
                         Console.Beep();
                         Console.WriteLine($"[{timestamp}] NEW ITEM DETECTED: {name}{scoreStr}");
                         if (score.HasValue) {
@@ -164,14 +164,16 @@ if (isMonitorMode)
                                 else
                                     Console.WriteLine($"  {text}");
                             }
-                        } else {
-                            Console.WriteLine($"  This item does not have a score.");
-                        }
+                        } 
 
                         // Find existing copies across all saves
                         var existing = FindExistingItems(name, findScript);
                         bool isBest = false;
-                        if (existing.Count > 0)
+                        if (existing.Count == 0)
+                        {
+                            Console.WriteLine($"************** This is your first one! ***************");
+                            isBest = true;
+                        } else
                         {
                             Console.WriteLine($"  You already have {existing.Count} of this item.");
                             isBest = true;
@@ -191,30 +193,30 @@ if (isMonitorMode)
                                 }
                                 else
                                 {
-                                    Console.WriteLine($"    Copy on {charName} (no score).");
+                                    Console.WriteLine($"    Copy on [{charName}]");
                                 }
-                                // Print stats of existing copy
-                                foreach (var statList in new[] { "runewordStats", "stats" })
-                                {
-                                    if (copy.TryGetProperty(statList, out var stats))
+
+                                if (score.HasValue) {
+                                    // Print stats of existing copy
+                                    foreach (var statList in new[] { "runewordStats", "stats" })
                                     {
-                                        foreach (var s in stats.EnumerateArray())
+                                        if (copy.TryGetProperty(statList, out var stats))
                                         {
-                                            var desc = s.TryGetProperty("description", out var d) ? d.GetString() : "?";
-                                            var rangeStr = s.TryGetProperty("range", out var r) ? $" [{r.GetString()}]" : "";
-                                            Console.WriteLine($"      {desc}{rangeStr}");
+                                            foreach (var s in stats.EnumerateArray())
+                                            {
+                                                var desc = s.TryGetProperty("description", out var d) ? d.GetString() : "?";
+                                                var rangeStr = s.TryGetProperty("range", out var r) ? $" [{r.GetString()}]" : "";
+                                                Console.WriteLine($"      {desc}{rangeStr}");
+                                            }
                                         }
                                     }
                                 }
+
                             }
-                            if (isBest)
+                            if (score.HasValue && isBest)
                                 Console.WriteLine($"************** This is the best one! ***************");
                         }
-                        else
-                        {
-                            Console.WriteLine($"************** This is your first one! ***************");
-                            isBest = true;
-                        }
+                        Console.WriteLine($"\n------\n");
                     }
                 }
             }
