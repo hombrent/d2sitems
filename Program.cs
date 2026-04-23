@@ -133,6 +133,12 @@ if (isMonitorMode)
 {
     var monitorFile = fileArgs[0];
     var monitorInterval = int.TryParse(config.GetValueOrDefault("monitor_interval", "5"), out var mi) ? mi : 5;
+    var beepSettings = config.GetValueOrDefault("beep", "none")
+        .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+        .Select(s => s.ToLowerInvariant()).ToHashSet();
+    bool beepOnFound = beepSettings.Contains("found");
+    bool beepOnBest = beepOnFound ? false : beepSettings.Contains("best");
+    bool beepOnNew = beepOnFound ? false : beepSettings.Contains("new");
     Console.WriteLine($"Monitoring {monitorFile} for new unique/set items every {monitorInterval}s (Ctrl+C to stop)...");
 
     var findScript = Path.Combine(Directory.GetCurrentDirectory(), "find_items.py");
@@ -175,7 +181,8 @@ if (isMonitorMode)
                         var statRanges = GetStatRangesForItem(item);
                         var score = CalculatePerfectionScore(item, statRanges);
                         var scoreStr = score.HasValue ? $" - (Perfection: {score:F2}%)" : " - (No Perfection Score)";
-                        Console.Beep();
+                        if (beepOnFound) Console.Beep();
+                        Console.WriteLine($"\n------\n");
                         Console.WriteLine($"[{timestamp}] NEW ITEM DETECTED: {name}{scoreStr}");
                         if (score.HasValue) {
 
@@ -208,6 +215,7 @@ if (isMonitorMode)
                         {
                             Console.WriteLine($"************** This is your first one! ***************");
                             isBest = true;
+                            if (beepOnNew) Console.Beep();
                         } else
                         {
                             Console.WriteLine($"  You already have {existing.Count} of this item.");
@@ -249,9 +257,11 @@ if (isMonitorMode)
 
                             }
                             if (score.HasValue && isBest)
+                            {
                                 Console.WriteLine($"************** This is the best one! ***************");
+                                if (beepOnBest) Console.Beep();
+                            }
                         }
-                        Console.WriteLine($"\n------\n");
                     }
                 }
             }
