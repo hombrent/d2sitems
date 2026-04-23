@@ -1,5 +1,6 @@
 using D2SSharp.Model;
 using D2SSharp.Enums;
+using System.Diagnostics;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -14,10 +15,32 @@ var defaultSaveDir = config.GetValueOrDefault("save_dir",
     Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         "Saved Games", "Diablo II Resurrected"));
 
-var fileArgs = args.ToList();
+// Check for --monitor mode
+if (args.Length >= 2 && args[0] == "--monitor")
+{
+    var monitorCharName = args[1];
+    var monitorFile = Path.Combine(defaultSaveDir, $"{monitorCharName}.d2s");
+    if (!File.Exists(monitorFile))
+    {
+        // Try as a direct path
+        if (File.Exists(monitorCharName))
+            monitorFile = monitorCharName;
+        else
+        {
+            Console.WriteLine($"File not found: {monitorFile}");
+            return;
+        }
+    }
+    // Need to load lookups before monitoring - fall through to load them,
+    // then run monitor mode after
+    args = new[] { "__monitor__", monitorFile };
+}
+
+var fileArgs = args.Where(a => a != "__monitor__").ToList();
+var isMonitorMode = args.Length >= 1 && args[0] == "__monitor__";
 
 // Default to the configured save directory if no files specified
-if (fileArgs.Count == 0)
+if (!isMonitorMode && fileArgs.Count == 0)
 {
     if (Directory.Exists(defaultSaveDir))
     {
@@ -26,7 +49,7 @@ if (fileArgs.Count == 0)
     }
     else
     {
-        Console.WriteLine("Usage: d2sitems [file.d2s|file.d2i|dir] ...");
+        Console.WriteLine("Usage: d2sitems [--monitor <charactername>] [file.d2s|file.d2i|dir] ...");
         Console.WriteLine($"Default directory not found: {defaultSaveDir}");
         return;
     }
@@ -46,6 +69,7 @@ foreach (var arg in fileArgs)
 }
 
 // Build lookups from game_files/default/excel (shared across all files)
+int missingFileCount = 0;
 var itemNames = BuildItemNameLookup(excelDir);
 var skillNames = BuildSkillNameLookup(excelDir);
 var runewordsByRunes = BuildRunewordLookup(excelDir);
@@ -63,6 +87,17 @@ var uniqueStatRanges = BuildUniqueStatRangesLookup(excelDir);
 var setStatRanges = BuildSetStatRangesLookup(excelDir);
 var runewordStatRanges = BuildRunewordStatRangesLookup(excelDir);
 
+if (missingFileCount > 0)
+{
+    Console.Write($"{missingFileCount} game file(s) could not be loaded. Continue anyway? (y/n) ");
+    var response = Console.ReadLine()?.Trim().ToLowerInvariant();
+    if (response != "y" && response != "yes")
+    {
+        Console.WriteLine("Exiting.");
+        return;
+    }
+}
+
 var jsonOptions = new JsonSerializerOptions
 {
     WriteIndented = true,
@@ -70,10 +105,26 @@ var jsonOptions = new JsonSerializerOptions
     Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
 };
 
+// In monitor mode, process all files in save_dir and mule_dir
+if (isMonitorMode)
+{
+    saveFiles.Clear();
+    if (Directory.Exists(defaultSaveDir))
+    {
+        saveFiles.AddRange(Directory.GetFiles(defaultSaveDir, "*.d2s"));
+        saveFiles.AddRange(Directory.GetFiles(defaultSaveDir, "*.d2i"));
+    }
+    var muleDir = config.GetValueOrDefault("mule_dir", "");
+    if (muleDir.Length > 0 && Directory.Exists(muleDir))
+    {
+        saveFiles.AddRange(Directory.GetFiles(muleDir, "*.d2s"));
+    }
+}
+
+// Process all save and stash files
+Console.WriteLine($"Processing {saveFiles.Count} save and stash files");
 foreach (var saveFile in saveFiles)
 {
-    Console.WriteLine($"Processing {saveFile}...");
-
     if (!File.Exists(saveFile))
     {
         Console.WriteLine($"  File not found: {saveFile}");
@@ -90,6 +141,223 @@ foreach (var saveFile in saveFiles)
     else
     {
         ProcessCharacterSave(saveFile, saveBytes);
+    }
+}
+
+// Monitor mode: watch a character for new unique/set items
+if (isMonitorMode)
+{
+    var monitorFile = fileArgs[0];
+    var monitorInterval = int.TryParse(config.GetValueOrDefault("monitor_interval", "5"), out var mi) ? mi : 5;
+    var beepSettings = config.GetValueOrDefault("beep", "none")
+        .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+        .Select(s => s.ToLowerInvariant()).ToHashSet();
+    bool beepOnFound = beepSettings.Contains("found");
+    bool beepOnBest = beepOnFound ? false : beepSettings.Contains("best");
+    bool beepOnNew = beepOnFound ? false : beepSettings.Contains("new");
+    // Determine the matching shared stash file for this character
+    string? monitorStashFile = null;
+    try
+    {
+        var initBytes = File.ReadAllBytes(monitorFile);
+        var initSave = D2Save.Read(initBytes);
+        var charGameVersion = initSave.Character.Preview.GameVersion.ToString();
+        var charCore = initSave.Character.Flags.HasFlag(CharacterFlags.Hardcore) ? "HardCore" : "SoftCore";
+        var stashPrefix = charGameVersion == "ReignOfTheWarlock" ? "Modern" : "";
+        var stashName = $"{stashPrefix}SharedStash{charCore}V2.d2i";
+        var stashPath = Path.Combine(defaultSaveDir, stashName);
+        if (File.Exists(stashPath))
+        {
+            monitorStashFile = stashPath;
+            Console.WriteLine($"Also refreshing shared stash: {Path.GetFileName(monitorStashFile)}");
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Warning: could not read character for stash detection: {ex.Message}");
+    }
+
+    Console.WriteLine($"Monitoring {monitorFile} for new unique/set items every {monitorInterval}s (Ctrl+C to stop)...");
+
+    var findScript = Path.Combine(Directory.GetCurrentDirectory(), "find_items.py");
+    if (!File.Exists(findScript))
+        findScript = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "find_items.py");
+
+    Dictionary<string, Item> previousItems = new();
+    bool firstRun = true;
+
+    while (true)
+    {
+        try
+        {
+            byte[] saveBytes = File.ReadAllBytes(monitorFile);
+            D2Save save = D2Save.Read(saveBytes);
+
+            var allItems = new List<Item>(save.Items);
+            if (save.MercItems != null)
+                foreach (var item in save.MercItems.Items)
+                    allItems.Add(item);
+
+            // Collect current unique/set items by name
+            var currentItems = new Dictionary<string, Item>();
+            foreach (var item in allItems)
+            {
+                if (item.Quality is ItemQuality.Unique or ItemQuality.Set)
+                {
+                    var name = GetItemDisplayName(item);
+                    currentItems.TryAdd(name, item);
+                }
+            }
+
+            if (!firstRun)
+            {
+                foreach (var (name, item) in currentItems)
+                {
+                    if (!previousItems.ContainsKey(name))
+                    {
+                        var timestamp = DateTime.Now.ToString("HH:mm:ss");
+                        var statRanges = GetStatRangesForItem(item);
+                        var score = CalculatePerfectionScore(item, statRanges);
+                        var scoreStr = score.HasValue ? $" - (Perfection: {score:F2}%)" : " - (No Perfection Score)";
+                        if (beepOnFound) Console.Beep();
+                        Console.WriteLine($"\n------\n");
+                        Console.WriteLine($"[{timestamp}] NEW ITEM DETECTED: {name}{scoreStr}");
+                        if (score.HasValue) {
+
+                            // Print stats with ranges
+                            if (item.Defense.HasValue)
+                            {
+                                var baseRange = GetBaseDefenseRange(item.ItemCodeString);
+                                if (baseRange != null)
+                                    Console.WriteLine($"  Defense: {item.Defense} (base: {baseRange})");
+                                else
+                                    Console.WriteLine($"  Defense: {item.Defense}");
+                            }
+                            var allMonStats = new List<Stat>();
+                            if (item.RunewordStats != null) allMonStats.AddRange(item.RunewordStats);
+                            if (item.Stats != null) allMonStats.AddRange(item.Stats);
+                            foreach (var stat in allMonStats)
+                            {
+                                var text = FormatStat(stat);
+                                if (statRanges != null && statRanges.TryGetValue(((int)stat.Id, stat.Layer), out var range) && range.Min != range.Max)
+                                    Console.WriteLine($"  {text} [{range.Min}-{range.Max}]");
+                                else
+                                    Console.WriteLine($"  {text}");
+                            }
+                        } 
+
+                        // Refresh shared stash JSON before searching
+                        if (monitorStashFile != null)
+                        {
+                            try
+                            {
+                                var stashBytes = File.ReadAllBytes(monitorStashFile);
+                                ProcessSharedStash(monitorStashFile, stashBytes);
+                            }
+                            catch { }
+                        }
+
+                        // Find existing copies across all saves
+                        var existing = FindExistingItems(name, findScript);
+                        bool isBest = false;
+                        if (existing.Count == 0)
+                        {
+                            Console.WriteLine($"************** This is your first one! ***************");
+                            isBest = true;
+                            if (beepOnNew) Console.Beep();
+                        } else
+                        {
+                            Console.WriteLine($"  You already have {existing.Count} of this item.");
+                            isBest = true;
+                            foreach (var copy in existing)
+                            {
+                                var charName = copy.TryGetProperty("character", out var cn) ? cn.GetString() : "?";
+                                if (copy.TryGetProperty("perfectionScore", out var ps))
+                                {
+                                    var copyScore = ps.GetDouble();
+                                    var scoreVal = score!.Value;
+                                    var comparison = scoreVal > copyScore ? "THE NEW ONE IS BETTER"
+                                        : scoreVal < copyScore ? "the new one is worse"
+                                        : "same score";
+                                    Console.WriteLine($"    Copy on {charName} scored {copyScore:F2}%. {comparison}.");
+                                    if (copyScore >= scoreVal)
+                                        isBest = false;
+                                }
+                                else
+                                {
+                                    Console.WriteLine($"    Copy on [{charName}]");
+                                }
+
+                                if (score.HasValue) {
+                                    // Print stats of existing copy
+                                    foreach (var statList in new[] { "runewordStats", "stats" })
+                                    {
+                                        if (copy.TryGetProperty(statList, out var stats))
+                                        {
+                                            foreach (var s in stats.EnumerateArray())
+                                            {
+                                                var desc = s.TryGetProperty("description", out var d) ? d.GetString() : "?";
+                                                var rangeStr = s.TryGetProperty("range", out var r) ? $" [{r.GetString()}]" : "";
+                                                Console.WriteLine($"      {desc}{rangeStr}");
+                                            }
+                                        }
+                                    }
+                                }
+
+                            }
+                            if (score.HasValue && isBest)
+                            {
+                                Console.WriteLine($"************** This is the best one! ***************");
+                                if (beepOnBest) Console.Beep();
+                            }
+                        }
+                    }
+                }
+            }
+            else
+            {
+                Console.WriteLine($"Loaded {currentItems.Count} unique/set items. Watching for changes...");
+                firstRun = false;
+            }
+
+            previousItems = currentItems;
+        }
+        catch (Exception ex)
+        {
+            // File might be locked during save, just skip this cycle
+            Console.WriteLine($"  (read error, retrying: {ex.Message})");
+        }
+
+        Thread.Sleep(monitorInterval * 1000);
+    }
+}
+
+List<JsonElement> FindExistingItems(string itemName, string findScript)
+{
+    var pythonCmd = config.GetValueOrDefault("python", "python");
+    try
+    {
+        var escapedName = $"^{Regex.Escape(itemName)}$";
+        var psi = new ProcessStartInfo
+        {
+            FileName = pythonCmd,
+            ArgumentList = { findScript, "--name", escapedName, "--json" },
+            UseShellExecute = false,
+            RedirectStandardOutput = true
+        };
+        var proc = Process.Start(psi);
+        if (proc == null) return new();
+        var output = proc.StandardOutput.ReadToEnd();
+        proc.WaitForExit();
+        var results = JsonSerializer.Deserialize<JsonElement>(output);
+        var list = new List<JsonElement>();
+        foreach (var el in results.EnumerateArray())
+            list.Add(el);
+        return list;
+    }
+    catch {
+        Console.WriteLine($"  Make sure python is installed and runnable.  You can set the python command in d2sitems.conf.");
+        return new();
     }
 }
 
@@ -147,7 +415,7 @@ void ProcessCharacterSave(string saveFile, byte[] saveBytes)
 
     var jsonPath = Path.ChangeExtension(saveFile, ".json");
     File.WriteAllText(jsonPath, JsonSerializer.Serialize(jsonData, jsonOptions));
-    Console.WriteLine($"  JSON written to {jsonPath}");
+    // Console.WriteLine($"  JSON written to {jsonPath}");
 }
 
 void ProcessSharedStash(string saveFile, byte[] saveBytes)
@@ -168,11 +436,19 @@ void ProcessSharedStash(string saveFile, byte[] saveBytes)
 
     // ── Write JSON output ──
 
+    // Determine core and gameVersion from filename
+    var fileName = Path.GetFileNameWithoutExtension(saveFile);
+    var core = fileName.Contains("HardCore", StringComparison.OrdinalIgnoreCase) ? "hard" : "soft";
+    var gameVersion = fileName.StartsWith("Modern", StringComparison.OrdinalIgnoreCase)
+        ? "ReignOfTheWarlock" : "Expansion";
+
     var allItems = tabItems.SelectMany(t => t.Items).Select(BuildItemJson).ToList();
     var jsonData = new Dictionary<string, object>
     {
         ["file"] = Path.GetFileName(saveFile),
         ["type"] = "SharedStash",
+        ["core"] = core,
+        ["gameVersion"] = gameVersion,
         ["tabs"] = tabItems.Select(t => new Dictionary<string, object>
         {
             ["name"] = t.TabName,
@@ -184,7 +460,7 @@ void ProcessSharedStash(string saveFile, byte[] saveBytes)
 
     var jsonPath = Path.ChangeExtension(saveFile, ".json");
     File.WriteAllText(jsonPath, JsonSerializer.Serialize(jsonData, jsonOptions));
-    Console.WriteLine($"  JSON written to {jsonPath}");
+    // Console.WriteLine($"  JSON written to {jsonPath}");
 }
 
 
@@ -766,7 +1042,7 @@ Dictionary<string, string> BuildItemNameLookup(string dir)
     foreach (var file in new[] { "armor.txt", "weapons.txt", "misc.txt" })
     {
         var path = Path.Combine(dir, file);
-        if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); continue; }
+        if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); missingFileCount++; continue; }
 
         var lines = File.ReadAllLines(path);
         if (lines.Length < 2) continue;
@@ -796,7 +1072,7 @@ Dictionary<int, string> BuildSkillNameLookup(string dir)
 {
     var lookup = new Dictionary<int, string>();
     var path = Path.Combine(dir, "skills.txt");
-    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); return lookup; }
+    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); missingFileCount++; return lookup; }
 
     var lines = File.ReadAllLines(path);
     if (lines.Length < 2) return lookup;
@@ -826,7 +1102,7 @@ Dictionary<string, string> BuildRunewordLookup(string dir)
     // Maps "r31,r06,r30" -> "Enigma" (rune code combo -> runeword name)
     var lookup = new Dictionary<string, string>();
     var path = Path.Combine(dir, "runes.txt");
-    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); return lookup; }
+    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); missingFileCount++; return lookup; }
 
     var lines = File.ReadAllLines(path);
     if (lines.Length < 2) return lookup;
@@ -880,7 +1156,7 @@ Dictionary<int, string> BuildSetItemNameLookup(string dir)
 Dictionary<int, string> BuildIndexedNameLookup(string path)
 {
     var lookup = new Dictionary<int, string>();
-    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); return lookup; }
+    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); missingFileCount++; return lookup; }
 
     var lines = File.ReadAllLines(path);
     if (lines.Length < 2) return lookup;
@@ -913,7 +1189,7 @@ Dictionary<string, int> BuildGemApplyTypeLookup(string dir)
     foreach (var file in new[] { "armor.txt", "weapons.txt" })
     {
         var path = Path.Combine(dir, file);
-        if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); continue; }
+        if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); missingFileCount++; continue; }
 
         var lines = File.ReadAllLines(path);
         if (lines.Length < 2) continue;
@@ -942,7 +1218,7 @@ Dictionary<string, GemModSet> BuildGemStatsLookup(string dir)
 {
     var lookup = new Dictionary<string, GemModSet>(StringComparer.OrdinalIgnoreCase);
     var path = Path.Combine(dir, "gems.txt");
-    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); return lookup; }
+    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); missingFileCount++; return lookup; }
 
     var lines = File.ReadAllLines(path);
     if (lines.Length < 2) return lookup;
@@ -991,7 +1267,7 @@ Dictionary<string, List<PropertyEntry>> BuildPropertyToStatsLookup(string dir)
 {
     var lookup = new Dictionary<string, List<PropertyEntry>>(StringComparer.OrdinalIgnoreCase);
     var path = Path.Combine(dir, "properties.txt");
-    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); return lookup; }
+    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); missingFileCount++; return lookup; }
 
     var lines = File.ReadAllLines(path);
     if (lines.Length < 2) return lookup;
@@ -1035,7 +1311,7 @@ Dictionary<string, int> BuildStatNameToIdLookup(string dir)
 {
     var lookup = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
     var path = Path.Combine(dir, "itemstatcost.txt");
-    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); return lookup; }
+    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); missingFileCount++; return lookup; }
 
     var lines = File.ReadAllLines(path);
     if (lines.Length < 2) return lookup;
@@ -1091,7 +1367,7 @@ Dictionary<string, string> BuildItemTypeLookup(string dir)
     }
     else
     {
-        Console.WriteLine($"Warning: game file not found: {typesPath}");
+        Console.WriteLine($"Warning: game file not found: {typesPath}"); missingFileCount++;
     }
 
     // Then map item code -> type name via armor/weapons/misc type columns
@@ -1135,7 +1411,7 @@ Dictionary<int, string> BuildSetItemSetNameLookup(string dir)
 {
     var lookup = new Dictionary<int, string>();
     var path = Path.Combine(dir, "setitems.txt");
-    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); return lookup; }
+    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); missingFileCount++; return lookup; }
 
     var lines = File.ReadAllLines(path);
     if (lines.Length < 2) return lookup;
@@ -1164,7 +1440,7 @@ Dictionary<string, string> BuildItemDefenseRangeLookup(string dir)
 {
     var lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
     var path = Path.Combine(dir, "armor.txt");
-    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); return lookup; }
+    if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); missingFileCount++; return lookup; }
 
     var lines = File.ReadAllLines(path);
     if (lines.Length < 2) return lookup;
@@ -1195,7 +1471,7 @@ Dictionary<string, string> BuildItemTierLookup(string dir)
     foreach (var file in new[] { "armor.txt", "weapons.txt" })
     {
         var path = Path.Combine(dir, file);
-        if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); continue; }
+        if (!File.Exists(path)) { Console.WriteLine($"Warning: game file not found: {path}"); missingFileCount++; continue; }
 
         var lines = File.ReadAllLines(path);
         if (lines.Length < 2) continue;
