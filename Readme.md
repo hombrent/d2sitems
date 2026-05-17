@@ -1,8 +1,9 @@
-This is a .net program that creates text file descriptions of what is inside diablo 2 save files.
+This is a .net program that creates json descriptions of what is inside diablo 2 save files.
 
 The purpose is to make it easier to search for specific items across all your saves/mules.
 
-It creates 2 files per d2s file.  One is a .txt file designed to be nice for humans to read.  The other is a json file to make it easier for computers to search.
+For Sets, Runewords and Uniques, it calculates a "Perfection Score" - that rates how well the item does in it's stats that have a range.
+It does not take the base defense of armor into account, but it does take enhanced defense into account.  It does not weight the value of different stats.  This score might not match what we humans value in items, but it should detect perfect/anti-perfect items and gives a very rough estimate on how good it is.
 
 
 
@@ -13,6 +14,10 @@ How to install/use.
 Download and install the .net 10.0 or higher sdk for your computer.
 
 - https://dotnet.microsoft.com/en-us/download/dotnet/10.0
+
+Download and install Python on your computer
+
+- https://www.python.org/downloads/windows/
 
 
 
@@ -28,16 +33,15 @@ I do not think you actually need to install the D2SSharp Library or if it happen
 We need some game files to interpret the saves.  You are going to need to extract the files.
 Use the D2RExtractor tool at https://github.com/levinium/D2RExtractor
 By default, the tool will look in the default game location to find unpacked game files.
+<<<<<<< HEAD
 
 You can specify the location of an "excel" directory with the --excel parameter, to parse files for a mod.
+=======
 
-To run on a single d2s file, from inside the d2sitems directory, run
+Settings can be configured in d2sitems.conf.  The defaults should work for standard installations of D2R.
 
-- dotnet run charname.d2s
 
-To run on all of your saved games:
 
-- dotnet run "c:\\Users\\YourUsername\\Saved Games\\Diablo II Resurrected"
 
 To run on all of your saved games in the default saved game location ( C:\Users\YourUsername\Saved Games\Diablo II Resurrected) :
 
@@ -65,7 +69,48 @@ Then copy bin/Release/net10.0/win-x64/d2sitems.exe to the main directory or wher
 
 
 
+
+To run on all of your saved games in the default saved game location ( C:\Users\YourUsername\Saved Games\Diablo II Resurrected) :
+
+- dotnet run 
+
+You can run this on your entire directory periodically - it will overwrite the old files to represent the current contents of your characters
+
+
+You can search for items with the find_items.py script.
+
+- .\find_item.py --help
+
+
+
+
+It is quite annoying finding the character that you want to pull an item off of in your 200 mules.  So, we have the concept of muling and fetching.
+
+- .\mule.py charname 
+
+This will move all of the files for this character into a mules directory (configured in d2sitems.conf) to get this character out of the way.  Searches will still find items that are on your mules.
+
+- .\fetch.py charname 
+
+This will retrieve the character from the mules directory and restore it into your main saved games directory.  If it is already in your saved_games directory, it will update the datetime on the file to bring it to the top of the list.
+
+The D2R client does not go to disk to update the list of characters that it has in memory.  In order to get an updated character list, you must exit the game and relaunch it.
+
+
+
+
+d2s save files are not edited or changed in any way.  We just read them and create extra files for fast searching.  I had tried another solution in the past that kept items in a database, but changes to the game and changes to the app corrupted the database and I lost all my items.  The design philosophy here is to leave the save files intact - only edit and change them with the game to be safe.  But build tools around the game to make managing items and mules easier.
+
+
+
 This uses the D2SSharp project. Thanks to ResurrectedTrader.  https://github.com/levinium/D2RExtractor
 
 This is vibe coded using claude.
+
+
+
+This is to serve as note to self.  I don't yet know how to build a working standalone exe file.
+    To build a new exe file that can be run directly, you can run:
+    - dotnet publish -r win-x64 -c Release /p:PublishSingleFile=true --self-contained true
+    Then copy bin/Release/net10.0/win-x64/d2sitems.exe to the main directory or wherever you want it.
 
