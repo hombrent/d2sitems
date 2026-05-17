@@ -238,7 +238,8 @@ if (isMonitorMode)
                         if (beepOnFound) Console.Beep();
                         Console.WriteLine($"\n------\n");
                         Console.WriteLine($"[{timestamp}] NEW ITEM DETECTED: {name}{scoreStr}");
-                        if (score.HasValue) {
+                        if (score.HasValue)
+                        {
 
                             // Print stats with ranges
                             if (item.Defense.HasValue)
@@ -260,7 +261,7 @@ if (isMonitorMode)
                                 else
                                     Console.WriteLine($"  {text}");
                             }
-                        } 
+                        }
 
                         // Refresh shared stash JSON before searching
                         if (monitorStashFile != null)
@@ -281,7 +282,8 @@ if (isMonitorMode)
                             Console.WriteLine($"************** This is your first one! ***************");
                             isBest = true;
                             if (beepOnNew) Console.Beep();
-                        } else
+                        }
+                        else
                         {
                             Console.WriteLine($"  You already have {existing.Count} of this item.");
                             isBest = true;
@@ -304,7 +306,8 @@ if (isMonitorMode)
                                     Console.WriteLine($"    Copy on [{charName}]");
                                 }
 
-                                if (score.HasValue) {
+                                if (score.HasValue)
+                                {
                                     // Print stats of existing copy
                                     foreach (var statList in new[] { "runewordStats", "stats" })
                                     {
@@ -371,7 +374,8 @@ List<JsonElement> FindExistingItems(string itemName, string findScript)
             list.Add(el);
         return list;
     }
-    catch {
+    catch
+    {
         Console.WriteLine($"  Make sure python is installed and runnable.  You can set the python command in d2sitems.conf.");
         return new();
     }
@@ -562,35 +566,6 @@ if (isMonitorMode)
         }
 
         Thread.Sleep(monitorInterval * 1000);
-    }
-}
-
-List<JsonElement> FindExistingItems(string itemName, string findScript)
-{
-    var pythonCmd = config.GetValueOrDefault("python", "python");
-    try
-    {
-        var escapedName = $"^{Regex.Escape(itemName)}$";
-        var psi = new ProcessStartInfo
-        {
-            FileName = pythonCmd,
-            ArgumentList = { findScript, "--name", escapedName, "--json" },
-            UseShellExecute = false,
-            RedirectStandardOutput = true
-        };
-        var proc = Process.Start(psi);
-        if (proc == null) return new();
-        var output = proc.StandardOutput.ReadToEnd();
-        proc.WaitForExit();
-        var results = JsonSerializer.Deserialize<JsonElement>(output);
-        var list = new List<JsonElement>();
-        foreach (var el in results.EnumerateArray())
-            list.Add(el);
-        return list;
-    }
-    catch {
-        Console.WriteLine($"  Make sure python is installed and runnable.  You can set the python command in d2sitems.conf.");
-        return new();
     }
 }
 
